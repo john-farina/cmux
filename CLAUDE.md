@@ -271,6 +271,7 @@ This is John's fork. `origin` = john-farina/cmux (push here), `upstream` = manaf
 ### Git + repo basics
 
 - **Plain git, no Graphite** — commit/push with git directly, to `origin` only.
+- **Commit-when-done rule**: every finished unit of work — feature, fix, config/docs change — gets its own clean commit pushed to `origin/main` immediately. One concern per commit, imperative subject describing WHAT changed (the fork's git log is the changelog). Don't batch unrelated changes; don't leave finished work uncommitted. Verified work only — build/test first (a DEV build for app code).
 - **Sync with upstream: `/sync-upstream`**. Upstream's `/pull` and `/sync-branch` assume `origin` = manaflow — don't use them here.
 - **CodeGraph is indexed** (`.codegraph/`, git-excluded locally). Prefer `codegraph_*` MCP tools over grep/glob for symbol lookup, callers/callees, exploration. Watcher lags edits ~500ms.
 - `.claude/settings.json` (fork-added) denies reads of node_modules/dist/xcframework/zig caches. `git add -f` for anything under `.claude/` — John's global gitignore ignores that dir.

@@ -3,6 +3,8 @@ import Foundation
 
 extension CMUXCLI {
     /// Drives one auto-naming pass for a Claude session at turn end.
+    /// `manual: true` (context-menu trigger) bypasses the enabled/user-owned/
+    /// staleness/throttle gates — the user explicitly asked for a rename.
     func runClaudeAutoNameHook(
         parsedInput: ClaudeHookParsedInput,
         mappedSession: ClaudeHookSessionRecord?,
@@ -10,20 +12,24 @@ extension CMUXCLI {
         surfaceId: String,
         sessionStore: ClaudeHookSessionStore,
         client: SocketClient,
-        telemetry: CLISocketSentryTelemetry
+        telemetry: CLISocketSentryTelemetry,
+        manual: Bool = false
     ) {
-        guard let sessionId = parsedInput.sessionId else { return }
+        guard let sessionId = parsedInput.sessionId ?? (manual ? mappedSession?.sessionId : nil) else { return }
         let env = ProcessInfo.processInfo.environment
-        guard let probe = try? client.sendV2(
+        let probe = (try? client.sendV2(
             method: "workspace.set_auto_title",
             params: ["probe": true, "workspace_id": workspaceId]
-        ), probe["enabled"] as? Bool == true else {
-            telemetry.breadcrumb("claude-hook.auto-name.disabled")
-            return
-        }
-        guard probe["workspace_user_owned"] as? Bool != true else {
-            telemetry.breadcrumb("claude-hook.auto-name.user-owned")
-            return
+        )) ?? [:]
+        if !manual {
+            guard probe["enabled"] as? Bool == true else {
+                telemetry.breadcrumb("claude-hook.auto-name.disabled")
+                return
+            }
+            guard probe["workspace_user_owned"] as? Bool != true else {
+                telemetry.breadcrumb("claude-hook.auto-name.user-owned")
+                return
+            }
         }
 
         let claudePid = mappedSession?.pid ?? claudeAgentPID(from: env)
@@ -31,7 +37,7 @@ extension CMUXCLI {
             telemetry.breadcrumb("claude-hook.auto-name.nested-suppressed")
             return
         }
-        guard shouldApplyClaudeHookVisibleMutation(
+        guard manual || shouldApplyClaudeHookVisibleMutation(
             sessionStore: sessionStore,
             parsedInput: parsedInput,
             workspaceId: workspaceId,
@@ -56,9 +62,16 @@ extension CMUXCLI {
             now: Date(),
             engine: engine
         ) else { return }
-        guard case .proceed(let baseline) = outcome.decision else {
-            telemetry.breadcrumb("claude-hook.auto-name.throttled")
-            return
+        let baseline: Int
+        switch outcome.decision {
+        case .proceed(let value):
+            baseline = value
+        default:
+            guard manual else {
+                telemetry.breadcrumb("claude-hook.auto-name.throttled")
+                return
+            }
+            baseline = lineCount
         }
 
         var confirmedTitle: String?
@@ -98,7 +111,8 @@ extension CMUXCLI {
             previousTitle: outcome.lastTitle,
             client: client,
             telemetryKey: "claude-hook.auto-name",
-            telemetry: telemetry
+            telemetry: telemetry,
+            manual: manual
         )
         // Re-report a missing override only after the fallback apply, so the
         // app's clear-on-apply doesn't immediately wipe the Settings note.

@@ -262,13 +262,15 @@ extension CMUXCLI {
         previousTitle: String?,
         client: SocketClient,
         telemetryKey: String,
-        telemetry: CLISocketSentryTelemetry
+        telemetry: CLISocketSentryTelemetry,
+        manual: Bool = false
     ) -> String? {
         guard let payload = try? client.sendV2(method: "workspace.set_auto_title", params: [
             "workspace_id": workspaceId,
             "panel_id": surfaceId,
             "panel_only_if_multiple": true,
-            "title": title
+            "title": title,
+            "manual": manual
         ]) else {
             telemetry.breadcrumb("\(telemetryKey).socket-failed")
             return nil

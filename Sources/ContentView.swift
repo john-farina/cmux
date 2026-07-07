@@ -14328,6 +14328,10 @@ struct TabItemView: View, Equatable {
             }
         }
 
+        Button(String(localized: "contextMenu.autoNameWorkspace", defaultValue: "Auto-Name Workspace")) {
+            triggerManualAutoName(workspaceIds: targetIds)
+        }
+
         if !isMulti {
             if let key = editWorkspaceDescriptionShortcut.keyEquivalent {
                 Button(String(localized: "contextMenu.editWorkspaceDescription", defaultValue: "Edit Workspace Description…")) {
@@ -14639,6 +14643,48 @@ struct TabItemView: View, Equatable {
             )
         }
         setSelectionToTabs()
+    }
+
+    /// Spawns the bundled CLI to run one manual auto-naming pass per
+    /// workspace (`cmux hooks claude auto-name --manual`). Detached: the
+    /// summarizer LLM call must never block the UI.
+    private func triggerManualAutoName(workspaceIds: [UUID]) {
+        guard let cliURL = Bundle.main.resourceURL?.appendingPathComponent("bin/cmux"),
+              FileManager.default.isExecutableFile(atPath: cliURL.path) else {
+            NSSound.beep()
+            return
+        }
+        let socketPath = TerminalController.shared.activeSocketPath(
+            preferredPath: SocketControlSettings.socketPath()
+        )
+        for workspaceId in workspaceIds {
+            let process = Process()
+            process.executableURL = cliURL
+            process.arguments = [
+                "--socket", socketPath,
+                "hooks", "claude", "auto-name",
+                "--workspace", workspaceId.uuidString,
+                "--manual",
+            ]
+            var environment = ProcessInfo.processInfo.environment
+            environment["CMUX_SOCKET_PATH"] = socketPath
+            environment["CMUX_BUNDLED_CLI_PATH"] = cliURL.path
+            environment.removeValue(forKey: "CMUX_SOCKET")
+            environment.removeValue(forKey: "CMUX_WORKSPACE_ID")
+            environment.removeValue(forKey: "CMUX_SURFACE_ID")
+            process.environment = environment
+            process.standardInput = FileHandle.nullDevice
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            process.terminationHandler = { _ in }
+            do {
+                try process.run()
+                CmuxLog.agentResume.log("auto-name.manual.spawned workspace=\(workspaceId.uuidString, privacy: .public)")
+            } catch {
+                CmuxLog.agentResume.error("auto-name.manual.spawn-failed workspace=\(workspaceId.uuidString, privacy: .public)")
+                NSSound.beep()
+            }
+        }
     }
 
     private func closeTabs(_ targetIds: [UUID], allowPinned: Bool) {

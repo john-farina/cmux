@@ -295,6 +295,22 @@ final class ClaudeHookSessionStore {
         }
     }
 
+    /// The active session record for a surface (preferred) or workspace —
+    /// used by manual auto-name triggers, which arrive without hook stdin.
+    func activeSessionRecord(workspaceId: String?, surfaceId: String?) throws -> ClaudeHookSessionRecord? {
+        try withLockedState { state in
+            if let surfaceId, !surfaceId.isEmpty,
+               let active = state.activeSessionsBySurface[surfaceId] {
+                return state.sessions[active.sessionId]
+            }
+            if let workspaceId, !workspaceId.isEmpty,
+               let active = state.activeSessionsByWorkspace[workspaceId] {
+                return state.sessions[active.sessionId]
+            }
+            return nil
+        }
+    }
+
     struct AutoNamingRecentMessagesSnapshot {
         var messages: [AutoNamingTranscriptMessage]
         var totalMessageCount: Int
@@ -24478,8 +24494,9 @@ struct CMUXCLI {
             // Auto-naming emits no feed events of its own; the sync Stop hook
             // already covers turn telemetry for this turn.
             didSendFeedTelemetry = true
+            let manual = hookArgs.contains("--manual")
             do {
-                let mappedSession = parsedInput.sessionId.flatMap { try? sessionStore.lookup(sessionId: $0) }
+                var mappedSession = parsedInput.sessionId.flatMap { try? sessionStore.lookup(sessionId: $0) }
                 guard let workspaceId = try resolvePreferredWorkspaceIdForClaudeHook(
                     preferred: mappedSession?.workspaceId,
                     fallback: workspaceArg,
@@ -24499,6 +24516,14 @@ struct CMUXCLI {
                     callerTerminalBinding: callerTTYBindingProvider,
                     client: client
                 )
+                if manual, mappedSession == nil {
+                    // Manual triggers arrive without hook stdin; the workspace's
+                    // active session supplies sessionId + transcript.
+                    mappedSession = try? sessionStore.activeSessionRecord(
+                        workspaceId: workspaceId,
+                        surfaceId: hookSurfaceFlag != nil ? surfaceId : nil
+                    )
+                }
                 runClaudeAutoNameHook(
                     parsedInput: parsedInput,
                     mappedSession: mappedSession,
@@ -24506,7 +24531,8 @@ struct CMUXCLI {
                     surfaceId: surfaceId,
                     sessionStore: sessionStore,
                     client: client,
-                    telemetry: telemetry
+                    telemetry: telemetry,
+                    manual: manual
                 )
             } catch {
                 telemetry.breadcrumb("claude-hook.auto-name.error")

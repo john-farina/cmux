@@ -3745,7 +3745,10 @@ class TerminalController {
             }
             return .ok(result)
         }
-        guard enabled else {
+        // Manual (context-menu) triggers work even when the automatic naming
+        // setting is off, and may replace a user-set title — the user asked.
+        let manual = v2Bool(params, "manual") ?? false
+        guard enabled || manual else {
             return .err(code: "disabled", message: "Workspace auto-naming is disabled in Settings", data: ["enabled": false])
         }
         // A naming pass reporting a problem (rate limit / out of tokens / signed
@@ -3779,6 +3782,9 @@ class TerminalController {
         v2MainSync {
             guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else { return }
             found = true
+            if manual, workspace.effectiveCustomTitleSource == .user {
+                tabManager.clearCustomTitle(tabId: workspaceId)
+            }
             workspaceApplied = tabManager.setCustomTitle(tabId: workspaceId, title: title, source: .auto)
             if let panelId {
                 // Hook payloads carry surface ids; accept either a panel id

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# ponytail: fork-local release build — drops CODE_SIGN_ENTITLEMENTS because the
-# restricted entitlements (passkeys, keychain group) need manaflow's provisioning
-# profile. everything else matches upstream reloadp.sh.
+# why: restricted entitlements need manaflow's provisioning profile; build-only
+# because the main cmux may be John's live terminal — /promote installs+relaunches.
 
 cd "$(dirname "$0")/.."
 xcodebuild -project cmux.xcodeproj -scheme cmux -configuration Release \
@@ -15,6 +14,3 @@ APP_PATH="$(
 )"
 echo "Release app:"
 echo "  ${APP_PATH}"
-pkill -x cmux || true
-sleep 0.2
-env -u GIT_PAGER -u GH_PAGER open -g "$APP_PATH"

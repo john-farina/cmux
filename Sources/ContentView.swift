@@ -8136,6 +8136,9 @@ struct ContentView: View {
     @discardableResult
     private func executeConfiguredAction(_ action: CmuxResolvedConfigAction) -> Bool {
         let baseCwd = configuredActionBaseCwd()
+        if cmuxConfigStore.templateActionIDs.contains(action.id) {
+            CmuxLog.agentTemplates.log("template.invoke name=\(action.workspaceCommandName ?? action.id, privacy: .public)")
+        }
         return CmuxConfigExecutor.execute(
             action: action,
             commands: cmuxConfigStore.loadedCommands,

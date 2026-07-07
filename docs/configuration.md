@@ -218,6 +218,29 @@ like the built-in path), a rule's stdout should be trusted: it can land at a she
 prompt. A non-zero exit, a timeout, or cancelling from the transfer indicator
 inserts nothing — exactly like an `scp` failure.
 
+## `templates`
+
+Named agent launch presets, surfaced in the command palette as **New Agent: <name>**. A template opens a new workspace in its `cwd` (tilde-expanded; defaults to the current workspace's directory) running `command` in a fresh terminal, with optional extra `env`. Templates are only ever launched explicitly from the palette — they are never applied to ordinary new tabs or workspaces.
+
+```json
+{
+  "templates": [
+    {
+      "name": "Reviewer",
+      "cwd": "~/Developer/cmux",
+      "command": "claude --model opus --permission-mode plan"
+    },
+    {
+      "name": "Yolo fixer",
+      "command": "claude --permission-mode acceptEdits",
+      "env": { "MY_FLAG": "1" }
+    }
+  ]
+}
+```
+
+Templates share the trust model of `commands`: entries from the global `~/.config/cmux/cmux.json` run immediately; entries from a project-local `cmux.json` show a trust dialog disclosing the cwd, command, and env before first run. A template with the same name as an existing command is ignored (first definition wins).
+
 ## `automation.workspaceAutoNaming`
 
 Opt-in AI auto-naming of workspaces and tabs from agent conversation content. When enabled, cmux summarizes supported agent sessions into short sidebar and tab names using each agent's own binary, and refreshes them as the conversation topic shifts. See [workspace-auto-naming.md](workspace-auto-naming.md) for the supported adapter list and full behavior.

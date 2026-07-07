@@ -85,6 +85,76 @@ final class CmuxConfigDecodingTests: XCTestCase {
         XCTAssertEqual(config.commands.map(\.name), ["Build", "Test", "Lint"])
     }
 
+    // MARK: Agent templates
+
+    func testDecodeAgentTemplates() throws {
+        let json = """
+        {
+          "templates": [
+            {
+              "name": "Reviewer",
+              "cwd": "~/Developer/cmux",
+              "command": "claude --model opus --permission-mode plan",
+              "env": { "FOO": "bar" }
+            },
+            { "name": "Fixer", "command": "claude --permission-mode acceptEdits" }
+          ]
+        }
+        """
+        let config = try decode(json)
+        XCTAssertEqual(config.templates.count, 2)
+        XCTAssertEqual(config.templates[0].name, "Reviewer")
+        XCTAssertEqual(config.templates[0].cwd, "~/Developer/cmux")
+        XCTAssertEqual(config.templates[0].env, ["FOO": "bar"])
+        XCTAssertEqual(config.templates[1].name, "Fixer")
+        XCTAssertNil(config.templates[1].cwd)
+    }
+
+    func testDecodeAgentTemplateMissingCommandFails() {
+        let json = """
+        { "templates": [{ "name": "Broken" }] }
+        """
+        XCTAssertThrowsError(try decode(json))
+    }
+
+    func testDecodeAgentTemplateBlankNameFails() {
+        let json = """
+        { "templates": [{ "name": "  ", "command": "claude" }] }
+        """
+        XCTAssertThrowsError(try decode(json))
+    }
+
+    func testAgentTemplateSyntheticCommandCarriesLaunchDetails() throws {
+        let json = """
+        {
+          "templates": [{
+            "name": "Reviewer",
+            "cwd": "~/Developer/cmux",
+            "command": "claude --model opus",
+            "env": { "FOO": "bar" }
+          }]
+        }
+        """
+        let config = try decode(json)
+        let synthetic = config.templates[0].syntheticCommand
+        XCTAssertEqual(synthetic.name, "Reviewer")
+        let workspace = try XCTUnwrap(synthetic.workspace)
+        XCTAssertEqual(workspace.name, "Reviewer")
+        XCTAssertEqual(workspace.cwd, "~/Developer/cmux")
+        XCTAssertEqual(workspace.env, ["FOO": "bar"])
+        guard case .pane(let pane) = try XCTUnwrap(workspace.layout) else {
+            return XCTFail("Expected single-pane layout")
+        }
+        XCTAssertEqual(pane.surfaces.count, 1)
+        XCTAssertEqual(pane.surfaces[0].type, .terminal)
+        XCTAssertEqual(pane.surfaces[0].command, "claude --model opus")
+    }
+
+    func testConfigWithoutTemplatesDecodesEmpty() throws {
+        let config = try decode("{}")
+        XCTAssertTrue(config.templates.isEmpty)
+    }
+
     func testDecodeNewWorkspaceCommand() throws {
         let json = """
         {

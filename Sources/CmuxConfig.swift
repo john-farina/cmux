@@ -16,11 +16,12 @@ struct CmuxConfigFile: Codable, Sendable {
     var newWorkspaceCommand: String?
     var surfaceTabBarButtons: [CmuxSurfaceTabBarButton]?
     var commands: [CmuxCommandDefinition]
+    var templates: [CmuxAgentTemplate]
     var vault: CmuxVaultConfigDefinition?
     var workspaceGroups: CmuxConfigWorkspaceGroupsDefinition?
 
     private enum CodingKeys: String, CodingKey {
-        case actions, ui, notifications, newWorkspaceCommand, surfaceTabBarButtons, commands, vault, workspaceGroups
+        case actions, ui, notifications, newWorkspaceCommand, surfaceTabBarButtons, commands, templates, vault, workspaceGroups
     }
 
     init(
@@ -30,6 +31,7 @@ struct CmuxConfigFile: Codable, Sendable {
         newWorkspaceCommand: String? = nil,
         surfaceTabBarButtons: [CmuxSurfaceTabBarButton]? = nil,
         commands: [CmuxCommandDefinition] = [],
+        templates: [CmuxAgentTemplate] = [],
         vault: CmuxVaultConfigDefinition? = nil,
         workspaceGroups: CmuxConfigWorkspaceGroupsDefinition? = nil
     ) {
@@ -39,6 +41,7 @@ struct CmuxConfigFile: Codable, Sendable {
         self.newWorkspaceCommand = newWorkspaceCommand
         self.surfaceTabBarButtons = surfaceTabBarButtons
         self.commands = commands
+        self.templates = templates
         self.vault = vault
         self.workspaceGroups = workspaceGroups
     }
@@ -87,6 +90,7 @@ struct CmuxConfigFile: Codable, Sendable {
             surfaceTabBarButtons = nil
         }
         commands = try container.decodeIfPresent([CmuxCommandDefinition].self, forKey: .commands) ?? []
+        templates = try container.decodeIfPresent([CmuxAgentTemplate].self, forKey: .templates) ?? []
         vault = try container.decodeIfPresent(CmuxVaultConfigDefinition.self, forKey: .vault)
         workspaceGroups = try container.decodeIfPresent(
             CmuxConfigWorkspaceGroupsDefinition.self,
@@ -1453,6 +1457,64 @@ struct CmuxResolvedConfigAction: Identifiable, Sendable, Hashable {
     }
 }
 
+/// Named agent launch preset from the top-level `templates` config key.
+/// Templates are explicitly invoked (command palette); they are never applied
+/// to ordinary new tabs. Each one synthesizes an inline-workspace command so
+/// palette surfacing, trust fingerprinting, and execution reuse the existing
+/// named-command path.
+struct CmuxAgentTemplate: Codable, Sendable, Hashable {
+    var name: String
+    var command: String
+    var cwd: String?
+    var env: [String: String]?
+
+    init(name: String, command: String, cwd: String? = nil, env: [String: String]? = nil) {
+        self.name = name
+        self.command = command
+        self.cwd = cwd
+        self.env = env
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        command = try container.decode(String.self, forKey: .command)
+        cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        env = try container.decodeIfPresent([String: String].self, forKey: .env)
+
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Template name must not be blank"
+                )
+            )
+        }
+        if command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Template '\(name)' must not define a blank 'command'"
+                )
+            )
+        }
+    }
+
+    var syntheticCommand: CmuxCommandDefinition {
+        CmuxCommandDefinition(
+            name: name,
+            workspace: CmuxWorkspaceDefinition(
+                name: name,
+                cwd: cwd,
+                env: env,
+                layout: .pane(CmuxPaneDefinition(surfaces: [
+                    CmuxSurfaceDefinition(type: .terminal, command: command)
+                ]))
+            )
+        )
+    }
+}
+
 struct CmuxCommandDefinition: Codable, Sendable, Identifiable {
     var name: String
     var description: String?
@@ -1745,6 +1807,8 @@ final class CmuxConfigStore: ObservableObject {
 
     /// Which config file each command came from, keyed by command id.
     private(set) var commandSourcePaths: [String: String] = [:]
+    /// Action ids synthesized from the `templates` config key (palette-only launch presets).
+    private(set) var templateActionIDs: Set<String> = []
     private(set) var actionLookup: [String: CmuxResolvedConfigAction] = [:]
     private(set) var surfaceTabBarButtonSourcePath: String?
     private(set) var surfaceTabBarCommandSourcePaths: [String: String] = [:]
@@ -1990,6 +2054,7 @@ final class CmuxConfigStore: ObservableObject {
         var commands: [CmuxCommandDefinition] = []
         var seenNames = Set<String>()
         var sourcePaths: [String: String] = [:]
+        var templateCommandIDs = Set<String>()
         var configuredNewWorkspaceCommandName: String?
         var configuredNewWorkspaceCommandSourcePath: String?
         var configuredNewWorkspaceActionID: String?
@@ -2054,6 +2119,17 @@ final class CmuxConfigStore: ObservableObject {
                     }
                 }
             }
+            for template in localConfig.templates {
+                let command = template.syntheticCommand
+                if !seenNames.contains(command.name) {
+                    commands.append(command)
+                    seenNames.insert(command.name)
+                    templateCommandIDs.insert(command.id)
+                    if let localPath {
+                        sourcePaths[command.id] = localPath
+                    }
+                }
+            }
         }
 
         // Global config fills in the rest
@@ -2091,13 +2167,23 @@ final class CmuxConfigStore: ObservableObject {
                     sourcePaths[command.id] = globalConfigPath
                 }
             }
+            for template in globalConfig.templates {
+                let command = template.syntheticCommand
+                if !seenNames.contains(command.name) {
+                    commands.append(command)
+                    seenNames.insert(command.name)
+                    templateCommandIDs.insert(command.id)
+                    sourcePaths[command.id] = globalConfigPath
+                }
+            }
         }
 
         let resolvedActions = resolvedActionRegistry(
             globalActions: globalActions,
             localActions: localActions,
             commands: commands,
-            commandSourcePaths: sourcePaths
+            commandSourcePaths: sourcePaths,
+            templateCommandIDs: templateCommandIDs
         )
         let resolvedActionLookup = Dictionary(uniqueKeysWithValues: resolvedActions.map { ($0.id, $0) })
         let configuredButtons = configuredSurfaceTabBarButtons ?? CmuxSurfaceTabBarButton.defaults
@@ -2154,6 +2240,10 @@ final class CmuxConfigStore: ObservableObject {
         loadedCommands = commands
         loadedActions = resolvedActions
         commandSourcePaths = sourcePaths
+        templateActionIDs = templateCommandIDs
+        if !templateCommandIDs.isEmpty {
+            CmuxLog.agentTemplates.log("templates.loaded count=\(templateCommandIDs.count, privacy: .public)")
+        }
         actionLookup = resolvedActionLookup
         newWorkspaceActionID = configuredNewWorkspaceActionID
         newWorkspaceActionSourcePath = configuredNewWorkspaceActionSourcePath
@@ -2301,7 +2391,8 @@ final class CmuxConfigStore: ObservableObject {
         globalActions: [String: ActionEntry],
         localActions: [String: ActionEntry],
         commands: [CmuxCommandDefinition],
-        commandSourcePaths: [String: String]
+        commandSourcePaths: [String: String],
+        templateCommandIDs: Set<String> = []
     ) -> [CmuxResolvedConfigAction] {
         var registry = Dictionary(
             uniqueKeysWithValues: CmuxSurfaceTabBarBuiltInAction.allCases.map {
@@ -2332,18 +2423,30 @@ final class CmuxConfigStore: ObservableObject {
 
         for command in commands where registry[command.id] == nil {
             let sourcePath = commandSourcePaths[command.id]
+            let isTemplate = templateCommandIDs.contains(command.id)
             registry[command.id] = CmuxResolvedConfigAction(
                 id: command.id,
-                title: String(
-                    localized: "command.cmuxConfig.customTitle",
-                    defaultValue: "Custom: \(sanitizeConfigText(command.name))"
-                ),
+                title: isTemplate
+                    ? String(
+                        localized: "command.cmuxConfig.templateTitle",
+                        defaultValue: "New Agent: \(sanitizeConfigText(command.name))"
+                    )
+                    : String(
+                        localized: "command.cmuxConfig.customTitle",
+                        defaultValue: "Custom: \(sanitizeConfigText(command.name))"
+                    ),
                 subtitle: command.description.map { sanitizeConfigText($0) }
-                    ?? String(localized: "command.cmuxConfig.subtitle", defaultValue: "cmux.json"),
-                keywords: command.keywords ?? [],
+                    ?? (isTemplate
+                        ? String(localized: "command.cmuxConfig.templateSubtitle", defaultValue: "Agent Template")
+                        : String(localized: "command.cmuxConfig.subtitle", defaultValue: "cmux.json")),
+                keywords: command.keywords ?? (isTemplate ? ["agent", "template", "new", "launch"] : []),
                 palette: true,
                 shortcut: nil,
-                icon: .symbol(command.workspace == nil ? "terminal" : "rectangle.stack.badge.plus"),
+                icon: .symbol(
+                    isTemplate
+                        ? "sparkles"
+                        : (command.workspace == nil ? "terminal" : "rectangle.stack.badge.plus")
+                ),
                 tooltip: command.description,
                 action: command.workspace == nil
                     ? .command(command.command ?? "")

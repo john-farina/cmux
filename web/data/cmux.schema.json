@@ -65,6 +65,35 @@
         "additionalProperties": true
       }
     },
+    "templates": {
+      "title": "templates",
+      "description": "Named agent launch presets, surfaced in the command palette as 'New Agent: <name>'. Each opens a new workspace in cwd running command; only ever launched explicitly, never applied to ordinary new tabs.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "command"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Display name; also the new workspace's title."
+          },
+          "command": {
+            "type": "string",
+            "description": "Shell command run in the new workspace's terminal, for example claude --model opus --permission-mode plan."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory (~ expands). Defaults to the current workspace's directory."
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "Extra environment variables for shells in the new workspace."
+          }
+        }
+      }
+    },
     "vault": {
       "title": "vault",
       "description": "Vault session restore agent registrations. cmux includes Pi by default; use this section to add or override JSONL-backed coding agents without an app update.",

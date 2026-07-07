@@ -14,4 +14,6 @@ func cmuxDebugLog(_ message: @autoclosure () -> String) {
 enum CmuxLog {
     static let session = Logger(subsystem: "com.cmuxterm.app", category: "session-persistence")
     static let agentResume = Logger(subsystem: "com.cmuxterm.app", category: "agent-resume")
+    static let agentTemplates = Logger(subsystem: "com.cmuxterm.app", category: "agent-templates")
+    static let externalImport = Logger(subsystem: "com.cmuxterm.app", category: "external-import")
 }

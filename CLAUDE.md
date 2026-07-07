@@ -268,37 +268,39 @@ Core skill map:
 
 This is John's fork. `origin` = john-farina/cmux (push here), `upstream` = manaflow-ai/cmux (pull only, never push).
 
-- **Version control: plain git.** No Graphite (`gt`) in this repo — commit and push with git directly, to `origin` only.
-- **Build tag: `john`.** Debug: `./scripts/reload.sh --tag john` (add `--launch` to open). Fast iteration loop.
-- **Release builds: `./scripts/reloadp-local.sh`**, NOT upstream `reloadp.sh`. Upstream release signing requires manaflow's Apple team (7WLXT3NR37) for the restricted entitlements (passkeys, keychain group); the local script drops `CODE_SIGN_ENTITLEMENTS` and ad-hoc signs. Passkeys-in-browser and shared keychain don't work in fork release builds — everything else does.
-- **Sync with upstream: `/sync-upstream`** (fetches upstream/main, merges into main, pushes to origin). The upstream `/pull` and `/sync-branch` commands assume `origin` = manaflow — don't use them here without mapping origin→upstream.
-- **CodeGraph is indexed** (`.codegraph/`, git-excluded locally). Prefer `codegraph_*` MCP tools over grep/glob for symbol lookup, callers/callees, and exploration — one `codegraph_context` call replaces dozens of file reads. The watcher lags edits ~500ms.
+### Git + repo basics
+
+- **Plain git, no Graphite** — commit/push with git directly, to `origin` only.
+- **Sync with upstream: `/sync-upstream`**. Upstream's `/pull` and `/sync-branch` assume `origin` = manaflow — don't use them here.
+- **CodeGraph is indexed** (`.codegraph/`, git-excluded locally). Prefer `codegraph_*` MCP tools over grep/glob for symbol lookup, callers/callees, exploration. Watcher lags edits ~500ms.
+- `.claude/settings.json` (fork-added) denies reads of node_modules/dist/xcframework/zig caches. `git add -f` for anything under `.claude/` — John's global gitignore ignores that dir.
 - Team dogfood / Stack auto-sign-in (`scripts/setup-team-dev.sh`) is manaflow-internal — skip it.
 
-### Ghostty submodule (knowledge carried over from ~/Developer/ghostty clone)
+### Build + ship flow
 
-- **Zig version trap**: ghostty requires zig 0.15.x and its build REJECTS brew's 0.16 (`requireZig` error; 0.16 changed `readFileAlloc` so build.zig won't parse). Ignore CONTRIBUTING's `brew install zig`. John pins 0.15.2 at `~/.local/bin/zig` → `~/.zig/current` (wins over brew on PATH). Verify with `zig version` before any GhosttyKit rebuild; to bump later, drop a new tarball in `~/.zig/` and repoint `~/.zig/current`.
-- **Where to edit in `ghostty/`**: terminal emulation/renderer/core → Zig in `src/`; macOS shell (windows, tabs, menus) → Swift in `macos/`; the C ABI between them lives in `include/`. cmux consumes it as GhosttyKit.xcframework — see the `cmux-ghostty` skill for the rebuild workflow.
-- John also keeps a standalone ghostty clone at `~/Developer/ghostty` (straight clone, no fork) with its own CLAUDE.local.md / reinstall flow — useful reference for upstream ghostty behavior, but don't confuse it with the submodule here.
+- **`/dev-build`** (or `./scripts/reload.sh --tag john --launch`): sandboxed DEBUG app — own bundle id (`com.cmuxterm.app.debug`), socket, session file, DerivedData. Never touches the real cmux. All feature dev and testing happens here.
+- **`/promote`** (runs `./scripts/reloadp-local.sh`): Release build → archive current app to `~/.cmux-backups/apps/` (last 10) → install to `/Applications/cmux.app` → **graceful** quit + relaunch. Built-in session restore + agent auto-resume make the restart near-lossless. The script refuses to force-kill; `--no-install` for build-only.
+- **Release signing**: upstream `reloadp.sh` needs manaflow's Apple team (7WLXT3NR37) for restricted entitlements; `reloadp-local.sh` drops `CODE_SIGN_ENTITLEMENTS` and ad-hoc signs. Cost: passkeys-in-browser + shared keychain don't work in fork release builds. It also pre-strips Finder xattrs (launching from DerivedData leaves detritus that fails codesign).
+- **Env hygiene**: `open` propagates the caller's env. Launching the real cmux from a claude/agent shell leaks `CLAUDECODE`/`CLAUDE_CODE_SESSION_ID`/etc into every pane — resumed claudes then think they're nested child sessions, show spurious allow/deny prompts, and exit (blank pane). `reloadp-local.sh` scrubs `CLAUDE*`/`ANTHROPIC*`/stray `CMUX_*`; any other launch path must too (or launch from Dock/Spotlight).
 
-### Testing without wrecking John's live session
+### Never wreck John's live session
 
-cmux may BE the terminal John is working in. Never kill, restart, or steal focus from his main cmux (or ghostty) instance.
+cmux may BE the terminal John is working in. Never kill, restart, or steal focus from his main cmux (or ghostty).
 
-- All dev/testing goes through the **tagged debug app** (`--tag john`) — own socket, own process; `reload.sh` only terminates the same-tag app.
-- CLI/socket dogfood: `CMUX_TAG=john scripts/cmux-debug-cli.sh ...`, never `/tmp/cmux-cli` (it can point at the main app's socket).
-- Research a non-disruptive, isolated test path FIRST (temp dirs, stubs, separate instance, background launch). Screenshots via `screencapture -l<CGWindowID>` (no focus steal), not full-screen capture with app activation. If touching live state is architecturally unavoidable, say so and get an OK first, keep it brief, verify state unchanged after.
-- **Feature dev flow**: `/dev-build` = sandboxed tagged DEV app with current changes (never touches the real cmux). `/promote` = install to /Applications/cmux.app with backup + graceful restart; built-in session restore + agent auto-resume make the restart near-lossless. `scripts/reloadp-local.sh` is build-only — it must never pkill or launch cmux.
+- Dev/testing only via the tagged DEV app; `reload.sh` only terminates the same-tag app.
+- CLI/socket dogfood: `CMUX_TAG=john scripts/cmux-debug-cli.sh ...`, never `/tmp/cmux-cli` (can point at the main app's socket).
+- Research a non-disruptive, isolated test path FIRST (temp dirs, stubs, separate instance, background launch). Screenshots via `screencapture -l<CGWindowID>`, no focus steal. If touching live state is unavoidable, say so and get an OK first; verify state unchanged after.
+- Restarting the real app: graceful quit only (SIGTERM/osascript) so the final ~8s-cadence session autosave lands.
 
-### Logging discipline (fork rule — applies to ALL new features and touched code)
+### Logging discipline (applies to ALL new features and touched code)
 
 Claudes debug this app after the fact from John's issue reports. Every feature must leave a readable trail.
 
-- **Release-safe logging via `CmuxLog`** (`Sources/App/DebugLogging.swift`): `os.Logger`, subsystem `com.cmuxterm.app`, one category per feature area (existing: `session-persistence`, `agent-resume`; add new categories as needed, kebab-case).
-- **When adding or meaningfully touching a code path, add probes at:** state transitions, decision points (log the decision AND the reason, especially skip/early-return reasons), and failure branches. One line, `key=value` style: `logger.log("restore.window workspaces=\(n, privacy: .public)")`.
-- **Levels**: `.log` for lifecycle/decisions (persisted to log store), `.error`/`.fault` for failures, `.debug` for high-frequency ticks (memory-only — never spam the persisted store; the ~8s autosave success is `.debug` for this reason).
-- **Never log**: scrollback contents, env var values, full commands (may embed tokens). Command PRESENCE, agent kind, panel/session UUIDs are fine. Mark interpolations `privacy: .public` (personal local build).
-- **DEBUG-only probes** still use `cmuxDebugLog` (upstream convention, `#if DEBUG`) — temporary dogfood probes get removed before commit; `CmuxLog` probes are permanent.
+- **Release-safe logging via `CmuxLog`** (`Sources/App/DebugLogging.swift`): `os.Logger`, subsystem `com.cmuxterm.app`, one kebab-case category per feature area. Existing categories + probe locations: `session-persistence` (SessionPersistence.swift restore policy, AppDelegate.swift snapshot save/load/restore driver), `agent-resume` (Workspace.swift resume/hibernation decisions).
+- **When adding or meaningfully touching a code path, add probes at**: state transitions, decisions (log the decision AND the reason, especially skip/early-return reasons), and failure branches. One line, `key=value` style: `logger.log("restore.window workspaces=\(n, privacy: .public)")`.
+- **Levels**: `.log` lifecycle/decisions (persisted), `.error`/`.fault` failures, `.debug` high-frequency ticks (memory-only — the ~8s autosave success is `.debug` for this reason).
+- **Never log**: scrollback contents, env values, full commands (may embed tokens). Command PRESENCE, agent kind, panel/session UUIDs are fine. Mark interpolations `privacy: .public` (personal local build).
+- **DEBUG-only probes** still use `cmuxDebugLog` (upstream convention, `#if DEBUG`); temporary probes get removed before commit — `CmuxLog` probes are permanent.
 
 **Reading logs when John reports an issue** (do this FIRST, before theorizing):
 ```bash
@@ -306,5 +308,10 @@ Claudes debug this app after the fact from John's issue reports. Every feature m
 /usr/bin/log show --last 2h --predicate 'subsystem == "com.cmuxterm.app"'
 /usr/bin/log show --last 1d --predicate 'subsystem == "com.cmuxterm.app" AND category == "agent-resume"'
 ```
-Debug builds additionally: `tail -f "$(cat /tmp/cmux-last-debug-log-path 2>/dev/null || echo /tmp/cmux-debug.log)"` and the `cmux-debugging` skill.
-- **Env hygiene when launching the real cmux**: `open` propagates the caller's env. Launching /Applications/cmux.app from inside a claude/agent shell leaks `CLAUDECODE`/`CLAUDE_CODE_SESSION_ID`/etc into every pane — resumed claudes then think they're nested child sessions, show spurious allow/deny prompts, and exit (blank pane). `reloadp-local.sh` scrubs these; any other launch path must too (or launch from Dock/Spotlight).
+Also useful: `~/.cmuxterm/events.jsonl` (agent hook events: SessionStart/Stop per session id — tells you whether a resumed claude actually attached). Debug builds additionally: `tail -f "$(cat /tmp/cmux-last-debug-log-path 2>/dev/null || echo /tmp/cmux-debug.log)"` and the `cmux-debugging` skill.
+
+### Ghostty submodule (knowledge from ~/Developer/ghostty clone)
+
+- **Zig version trap**: ghostty requires zig 0.15.x and REJECTS brew's 0.16 (`requireZig`; 0.16 changed `readFileAlloc` so build.zig won't parse). Ignore CONTRIBUTING's `brew install zig`. John pins 0.15.2 at `~/.local/bin/zig` → `~/.zig/current` (wins over brew on PATH). Verify `zig version` before any GhosttyKit rebuild; bump by dropping a new tarball in `~/.zig/` and repointing `~/.zig/current`.
+- **Where to edit in `ghostty/`**: terminal core/renderer → Zig in `src/`; macOS shell → Swift in `macos/`; C ABI in `include/`. cmux consumes it as GhosttyKit.xcframework — see the `cmux-ghostty` skill.
+- John also keeps a standalone ghostty clone at `~/Developer/ghostty` (straight clone, own CLAUDE.local.md / reinstall flow) — reference for upstream ghostty behavior; don't confuse it with the submodule.

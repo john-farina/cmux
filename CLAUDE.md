@@ -263,3 +263,14 @@ Core skill map:
 - `cmux-shared-behavior`: shared action paths for multi-entrypoint behavior and optimistic updates.
 - `cmux-ghostty`: Ghostty submodule and GhosttyKit workflow.
 - `cmux-release`: release, version bump, changelog, pretag guard, and release asset workflow.
+
+## Fork notes (john-farina/cmux)
+
+This is John's fork. `origin` = john-farina/cmux (push here), `upstream` = manaflow-ai/cmux (pull only, never push).
+
+- **Version control: plain git.** No Graphite (`gt`) in this repo — commit and push with git directly, to `origin` only.
+- **Build tag: `john`.** Debug: `./scripts/reload.sh --tag john` (add `--launch` to open). Fast iteration loop.
+- **Release builds: `./scripts/reloadp-local.sh`**, NOT upstream `reloadp.sh`. Upstream release signing requires manaflow's Apple team (7WLXT3NR37) for the restricted entitlements (passkeys, keychain group); the local script drops `CODE_SIGN_ENTITLEMENTS` and ad-hoc signs. Passkeys-in-browser and shared keychain don't work in fork release builds — everything else does.
+- **Sync with upstream: `/sync-upstream`** (fetches upstream/main, merges into main, pushes to origin). The upstream `/pull` and `/sync-branch` commands assume `origin` = manaflow — don't use them here without mapping origin→upstream.
+- **CodeGraph is indexed** (`.codegraph/`, git-excluded locally). Prefer `codegraph_*` MCP tools over grep/glob for symbol lookup, callers/callees, and exploration — one `codegraph_context` call replaces dozens of file reads. The watcher lags edits ~500ms.
+- Team dogfood / Stack auto-sign-in (`scripts/setup-team-dev.sh`) is manaflow-internal — skip it.

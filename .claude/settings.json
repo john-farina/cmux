@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./web/node_modules/**)",
+      "Read(./webviews/node_modules/**)",
+      "Read(./node_modules/**)",
+      "Read(./GhosttyKit.xcframework/**)",
+      "Read(./ghostty/zig-out/**)",
+      "Read(./ghostty/.zig-cache/**)",
+      "Read(./web/dist/**)",
+      "Read(./webviews/dist/**)"
+    ]
+  }
+}

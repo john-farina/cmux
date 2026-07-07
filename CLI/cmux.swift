@@ -311,6 +311,27 @@ final class ClaudeHookSessionStore {
         }
     }
 
+    /// Every surface-active session in a workspace (one per terminal tab
+    /// running an agent) — manual auto-name fans out over these so each tab
+    /// gets its own name. Falls back to the workspace-active session when
+    /// no per-surface entries exist (legacy stores).
+    func activeSessionRecords(workspaceId: String) throws -> [(surfaceId: String, record: ClaudeHookSessionRecord)] {
+        try withLockedState { state in
+            var results: [(surfaceId: String, record: ClaudeHookSessionRecord)] = []
+            for (surfaceId, active) in state.activeSessionsBySurface {
+                guard let record = state.sessions[active.sessionId],
+                      record.workspaceId == workspaceId else { continue }
+                results.append((surfaceId: surfaceId, record: record))
+            }
+            if results.isEmpty,
+               let active = state.activeSessionsByWorkspace[workspaceId],
+               let record = state.sessions[active.sessionId] {
+                results.append((surfaceId: record.surfaceId, record: record))
+            }
+            return results.sorted { $0.surfaceId < $1.surfaceId }
+        }
+    }
+
     struct AutoNamingRecentMessagesSnapshot {
         var messages: [AutoNamingTranscriptMessage]
         var totalMessageCount: Int
@@ -24516,12 +24537,32 @@ struct CMUXCLI {
                     callerTerminalBinding: callerTTYBindingProvider,
                     client: client
                 )
+                if manual, mappedSession == nil, hookSurfaceFlag == nil {
+                    // why: workspace-wide manual trigger names each tab separately
+                    let actives = (try? sessionStore.activeSessionRecords(workspaceId: workspaceId)) ?? []
+                    for entry in actives {
+                        runClaudeAutoNameHook(
+                            parsedInput: parsedInput,
+                            mappedSession: entry.record,
+                            workspaceId: workspaceId,
+                            surfaceId: entry.surfaceId,
+                            sessionStore: sessionStore,
+                            client: client,
+                            telemetry: telemetry,
+                            manual: true
+                        )
+                    }
+                    if actives.isEmpty {
+                        telemetry.breadcrumb("claude-hook.auto-name.manual-no-active")
+                    }
+                    print("OK")
+                    return
+                }
                 if manual, mappedSession == nil {
-                    // Manual triggers arrive without hook stdin; the workspace's
-                    // active session supplies sessionId + transcript.
+                    // Manual trigger scoped to one surface.
                     mappedSession = try? sessionStore.activeSessionRecord(
                         workspaceId: workspaceId,
-                        surfaceId: hookSurfaceFlag != nil ? surfaceId : nil
+                        surfaceId: surfaceId
                     )
                 }
                 runClaudeAutoNameHook(

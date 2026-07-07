@@ -274,3 +274,17 @@ This is John's fork. `origin` = john-farina/cmux (push here), `upstream` = manaf
 - **Sync with upstream: `/sync-upstream`** (fetches upstream/main, merges into main, pushes to origin). The upstream `/pull` and `/sync-branch` commands assume `origin` = manaflow — don't use them here without mapping origin→upstream.
 - **CodeGraph is indexed** (`.codegraph/`, git-excluded locally). Prefer `codegraph_*` MCP tools over grep/glob for symbol lookup, callers/callees, and exploration — one `codegraph_context` call replaces dozens of file reads. The watcher lags edits ~500ms.
 - Team dogfood / Stack auto-sign-in (`scripts/setup-team-dev.sh`) is manaflow-internal — skip it.
+
+### Ghostty submodule (knowledge carried over from ~/Developer/ghostty clone)
+
+- **Zig version trap**: ghostty requires zig 0.15.x and its build REJECTS brew's 0.16 (`requireZig` error; 0.16 changed `readFileAlloc` so build.zig won't parse). Ignore CONTRIBUTING's `brew install zig`. John pins 0.15.2 at `~/.local/bin/zig` → `~/.zig/current` (wins over brew on PATH). Verify with `zig version` before any GhosttyKit rebuild; to bump later, drop a new tarball in `~/.zig/` and repoint `~/.zig/current`.
+- **Where to edit in `ghostty/`**: terminal emulation/renderer/core → Zig in `src/`; macOS shell (windows, tabs, menus) → Swift in `macos/`; the C ABI between them lives in `include/`. cmux consumes it as GhosttyKit.xcframework — see the `cmux-ghostty` skill for the rebuild workflow.
+- John also keeps a standalone ghostty clone at `~/Developer/ghostty` (straight clone, no fork) with its own CLAUDE.local.md / reinstall flow — useful reference for upstream ghostty behavior, but don't confuse it with the submodule here.
+
+### Testing without wrecking John's live session
+
+cmux may BE the terminal John is working in. Never kill, restart, or steal focus from his main cmux (or ghostty) instance.
+
+- All dev/testing goes through the **tagged debug app** (`--tag john`) — own socket, own process; `reload.sh` only terminates the same-tag app.
+- CLI/socket dogfood: `CMUX_TAG=john scripts/cmux-debug-cli.sh ...`, never `/tmp/cmux-cli` (it can point at the main app's socket).
+- Research a non-disruptive, isolated test path FIRST (temp dirs, stubs, separate instance, background launch). Screenshots via `screencapture -l<CGWindowID>` (no focus steal), not full-screen capture with app activation. If touching live state is architecturally unavoidable, say so and get an OK first, keep it brief, verify state unchanged after.

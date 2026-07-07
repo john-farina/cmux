@@ -159,9 +159,11 @@ enum SessionRestorePolicy {
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
         if environment["CMUX_DISABLE_SESSION_RESTORE"] == "1" {
+            CmuxLog.session.log("shouldAttemptRestore=false reason=disabled-by-env")
             return false
         }
         if isRunningUnderAutomatedTests(environment: environment) {
+            CmuxLog.session.log("shouldAttemptRestore=false reason=automated-tests")
             return false
         }
 
@@ -170,7 +172,12 @@ enum SessionRestorePolicy {
             .filter { !$0.hasPrefix("-psn_") }
 
         // Any explicit launch argument is treated as an explicit open intent.
-        return extraArgs.isEmpty
+        if extraArgs.isEmpty {
+            CmuxLog.session.log("shouldAttemptRestore=true")
+            return true
+        }
+        CmuxLog.session.log("shouldAttemptRestore=false reason=explicit-launch-args count=\(extraArgs.count, privacy: .public)")
+        return false
     }
 }
 

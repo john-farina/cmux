@@ -1391,6 +1391,25 @@ extension Workspace {
             let restoredAgentWillRunStartupInput =
                 restoredAgentResumeLaunch?.initialInput != nil ||
                 (restoredBindingLaunch?.initialInput != nil && resumeBinding?.isAgentHookBinding == true)
+            if let restorableAgent {
+                let decision: String
+                if restoredAgentWillRunStartupCommand || restoredAgentWillRunStartupInput {
+                    decision = "resume-injected"
+                } else if restoredHibernation != nil, restorableAgent.resumeCommand != nil {
+                    decision = "hibernated"
+                } else if restorableAgent.resumeCommand == nil {
+                    decision = "skipped reason=no-resume-command"
+                } else if !autoResumeAgentSessions {
+                    decision = "skipped reason=auto-resume-disabled"
+                } else if !agentWasRunningAtQuit {
+                    decision = "skipped reason=agent-not-running-at-quit"
+                } else {
+                    decision = "skipped reason=empty-startup-input"
+                }
+                CmuxLog.agentResume.log("restore panel=\(String(snapshot.id.uuidString.prefix(8)), privacy: .public) kind=\(restorableAgent.kind.rawValue, privacy: .public) session=\(restorableAgent.sessionId, privacy: .public) \(decision, privacy: .public)")
+            } else if let resumeBinding {
+                CmuxLog.agentResume.log("restore panel=\(String(snapshot.id.uuidString.prefix(8)), privacy: .public) binding=\(resumeBinding.kind ?? "unknown", privacy: .public) injected=\(restoredBindingLaunch != nil, privacy: .public)")
+            }
 #if DEBUG
             if let restorableAgent {
                 let sessionPreview = String(restorableAgent.sessionId.prefix(8))
@@ -4635,10 +4654,12 @@ final class Workspace: Identifiable, ObservableObject {
     ) -> SessionRestorableAgentSnapshot? {
         guard let snapshot = restoredAgentSnapshotsByPanelId[panelId] ?? index.snapshot(workspaceId: id, panelId: panelId),
               snapshot.resumeCommand != nil else {
+            CmuxLog.agentResume.debug("hibernate.candidate.skip panel=\(String(panelId.uuidString.prefix(8)), privacy: .public) reason=no-resume-command")
             return nil
         }
         let fingerprint = TabManager.restorableAgentSnapshotFingerprint(snapshot)
         guard invalidatedRestoredAgentFingerprintsByPanelId[panelId] != fingerprint else {
+            CmuxLog.agentResume.debug("hibernate.candidate.skip panel=\(String(panelId.uuidString.prefix(8)), privacy: .public) reason=fingerprint-invalidated")
             return nil
         }
         return snapshot
@@ -4651,9 +4672,14 @@ final class Workspace: Identifiable, ObservableObject {
     ) {
         guard let terminalPanel = panels[panelId] as? TerminalPanel,
               !terminalPanel.isAgentHibernated else {
+            CmuxLog.agentResume.debug("hibernate.skip panel=\(String(panelId.uuidString.prefix(8)), privacy: .public) reason=not-terminal-or-already-hibernated")
             return
         }
-        guard agent.resumeCommand != nil else { return }
+        guard agent.resumeCommand != nil else {
+            CmuxLog.agentResume.debug("hibernate.skip panel=\(String(panelId.uuidString.prefix(8)), privacy: .public) reason=no-resume-command")
+            return
+        }
+        CmuxLog.agentResume.debug("hibernate panel=\(String(panelId.uuidString.prefix(8)), privacy: .public) kind=\(agent.kind.rawValue, privacy: .public)")
         restoredAgentSnapshotsByPanelId[panelId] = agent
         restoredAgentResumeStatesByPanelId[panelId] = .manualResumeAvailable
         invalidatedRestoredAgentFingerprintsByPanelId.removeValue(forKey: panelId)
@@ -4764,6 +4790,7 @@ final class Workspace: Identifiable, ObservableObject {
         invalidatedRestoredAgentFingerprintsByPanelId[panelId] = fingerprint
         clearRestoredAgentResumeBinding(panelId: panelId, restoredAgent: restoredAgent)
         clearRestoredAgentSnapshot(panelId: panelId)
+        CmuxLog.agentResume.log("invalidate panel=\(String(panelId.uuidString.prefix(8)), privacy: .public) kind=\(restoredAgent.kind.rawValue, privacy: .public) session=\(restoredAgent.sessionId, privacy: .public)")
 #if DEBUG
         cmuxDebugLog(
             "session.restore.agent.invalidate panel=\(panelId.uuidString.prefix(5)) " +

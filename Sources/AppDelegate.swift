@@ -3179,6 +3179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         Self.removeLegacyPersistedWindowGeometry()
         syncManualRestoreSnapshotCachePruningCrashDiagnostics()
         let sanitizedStartupSnapshot = loadStartupSessionSnapshotPruningCrashDiagnostics()
+        CmuxLog.session.log("startup.snapshot found=\(sanitizedStartupSnapshot != nil, privacy: .public) windows=\(sanitizedStartupSnapshot?.windows.count ?? 0, privacy: .public)")
         guard SessionRestorePolicy.shouldAttemptRestore() else { return }
         startupSessionSnapshot = sanitizedStartupSnapshot
     }
@@ -3195,10 +3196,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return loadManualRestoreSessionSnapshotPruningCrashDiagnostics()
         case .missing:
             if Self.hasCrashOnlyPrimarySnapshotRemovalMarker() {
+                CmuxLog.session.log("startup.snapshot primary=missing crashMarker=true fallback=manual-restore-backup")
                 return loadManualRestoreSessionSnapshotPruningCrashDiagnostics()
             }
             return nil
         case .unusable:
+            CmuxLog.session.error("startup.snapshot primary=unusable fallback=manual-restore-backup")
             return loadManualRestoreSessionSnapshotPruningCrashDiagnostics()
         }
     }
@@ -3306,6 +3309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let startupSnapshot = startupSessionSnapshot
         let primaryWindowSnapshot = startupSnapshot?.windows.first
+        CmuxLog.session.log("restore.start snapshot=\(startupSnapshot != nil, privacy: .public) windows=\(startupSnapshot?.windows.count ?? 0, privacy: .public)")
         if let primaryWindowSnapshot {
             isApplyingSessionRestore = true
 #if DEBUG
@@ -3441,7 +3445,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 "snapshotDisplay={\(debugSessionDisplayDescription(snapshot.display))}"
         )
 #endif
-        context.tabManager.restoreSessionSnapshot(snapshot.tabManager)
+        let restoredPanelIdsByWorkspace = context.tabManager.restoreSessionSnapshot(snapshot.tabManager)
+        CmuxLog.session.log("restore.window workspaces=\(restoredPanelIdsByWorkspace.count, privacy: .public) panes=\(restoredPanelIdsByWorkspace.map(\.count).reduce(0, +), privacy: .public)")
         if let originalWindowId = snapshot.windowId,
            originalWindowId != context.windowId {
             ClosedItemHistoryStore.shared.remapWorkspaceWindowIds(from: originalWindowId, to: context.windowId)
@@ -4395,13 +4400,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
             if let snapshot {
                 Self.clearCrashOnlyPrimarySnapshotRemovalMarker()
-                _ = self.sessionSnapshotStore.save(snapshot, fileURL: nil)
+                let didSave = self.sessionSnapshotStore.save(snapshot, fileURL: nil)
+                if didSave {
+                    CmuxLog.session.debug("snapshot.save ok windows=\(snapshot.windows.count, privacy: .public)")
+                } else {
+                    CmuxLog.session.error("snapshot.save failed windows=\(snapshot.windows.count, privacy: .public)")
+                }
             } else if removeWhenEmpty {
                 if preserveManualRestoreBackupOnMissingPrimary {
                     Self.markCrashOnlyPrimarySnapshotRemoval()
                 } else {
                     Self.clearCrashOnlyPrimarySnapshotRemovalMarker()
                 }
+                CmuxLog.session.log("snapshot.remove removeWhenEmpty=true preserveBackup=\(preserveManualRestoreBackupOnMissingPrimary, privacy: .public)")
                 self.sessionSnapshotStore.removeSnapshot(fileURL: nil)
             }
         }

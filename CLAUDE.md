@@ -289,3 +289,20 @@ cmux may BE the terminal John is working in. Never kill, restart, or steal focus
 - CLI/socket dogfood: `CMUX_TAG=john scripts/cmux-debug-cli.sh ...`, never `/tmp/cmux-cli` (it can point at the main app's socket).
 - Research a non-disruptive, isolated test path FIRST (temp dirs, stubs, separate instance, background launch). Screenshots via `screencapture -l<CGWindowID>` (no focus steal), not full-screen capture with app activation. If touching live state is architecturally unavoidable, say so and get an OK first, keep it brief, verify state unchanged after.
 - **Feature dev flow**: `/dev-build` = sandboxed tagged DEV app with current changes (never touches the real cmux). `/promote` = install to /Applications/cmux.app with backup + graceful restart; built-in session restore + agent auto-resume make the restart near-lossless. `scripts/reloadp-local.sh` is build-only — it must never pkill or launch cmux.
+
+### Logging discipline (fork rule — applies to ALL new features and touched code)
+
+Claudes debug this app after the fact from John's issue reports. Every feature must leave a readable trail.
+
+- **Release-safe logging via `CmuxLog`** (`Sources/App/DebugLogging.swift`): `os.Logger`, subsystem `com.cmuxterm.app`, one category per feature area (existing: `session-persistence`, `agent-resume`; add new categories as needed, kebab-case).
+- **When adding or meaningfully touching a code path, add probes at:** state transitions, decision points (log the decision AND the reason, especially skip/early-return reasons), and failure branches. One line, `key=value` style: `logger.log("restore.window workspaces=\(n, privacy: .public)")`.
+- **Levels**: `.log` for lifecycle/decisions (persisted to log store), `.error`/`.fault` for failures, `.debug` for high-frequency ticks (memory-only — never spam the persisted store; the ~8s autosave success is `.debug` for this reason).
+- **Never log**: scrollback contents, env var values, full commands (may embed tokens). Command PRESENCE, agent kind, panel/session UUIDs are fine. Mark interpolations `privacy: .public` (personal local build).
+- **DEBUG-only probes** still use `cmuxDebugLog` (upstream convention, `#if DEBUG`) — temporary dogfood probes get removed before commit; `CmuxLog` probes are permanent.
+
+**Reading logs when John reports an issue** (do this FIRST, before theorizing):
+```bash
+log show --predicate 'subsystem == "com.cmuxterm.app"' --last 2h --style compact
+log show --predicate 'subsystem == "com.cmuxterm.app" AND category == "agent-resume"' --last 1d
+```
+Debug builds additionally: `tail -f "$(cat /tmp/cmux-last-debug-log-path 2>/dev/null || echo /tmp/cmux-debug.log)"` and the `cmux-debugging` skill.

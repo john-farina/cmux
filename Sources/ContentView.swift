@@ -957,6 +957,8 @@ struct ContentView: View {
     @State private var commandPaletteResultsRevision: UInt64 = 0
     @State private var commandPaletteUsageHistoryByCommandId: [String: CommandPaletteUsageEntry] = [:]
     @State private var isFeedbackComposerPresented = false
+    @State var isExternalImportSheetPresented = false
+    @State var externalImportCandidates: [ExternalClaudeSession] = []
     @AppStorage(AppCatalogSection().renameSelectsExistingName.userDefaultsKey)
     private var commandPaletteRenameSelectAllOnFocus = AppCatalogSection().renameSelectsExistingName.defaultValue
     @AppStorage(AppCatalogSection().commandPaletteSearchesAllSurfaces.userDefaultsKey)
@@ -3119,6 +3121,11 @@ struct ContentView: View {
         view = AnyView(view.ignoresSafeArea())
         view = AnyView(view.sheet(isPresented: $isFeedbackComposerPresented) {
             SidebarFeedbackComposerSheet()
+        })
+        view = AnyView(view.sheet(isPresented: $isExternalImportSheetPresented) {
+            ExternalSessionImportSheet(sessions: externalImportCandidates) { selected in
+                importExternalSessions(selected)
+            }
         })
 
         view = AnyView(view.onDisappear {
@@ -6604,6 +6611,7 @@ struct ContentView: View {
             )
         )
         contributions.append(contentsOf: Self.commandPaletteAuthCommandContributions() + Self.commandPaletteProCommandContributions())
+        contributions.append(contentsOf: Self.commandPaletteExternalSessionImportContributions())
         contributions.append(
             CommandPaletteCommandContribution(
                 commandId: "palette.makeDefaultTerminal",
@@ -7731,6 +7739,7 @@ struct ContentView: View {
         }
         registerAuthCommandHandlers(&registry)
         registerProCommandHandlers(&registry)
+        registerExternalSessionImportCommandHandlers(&registry)
         registry.register(commandId: "palette.makeDefaultTerminal") {
             DefaultTerminalUserAction.setAsDefault(debugSource: "palette.makeDefaultTerminal")
         }

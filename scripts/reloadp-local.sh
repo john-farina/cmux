@@ -52,7 +52,12 @@ ditto "$APP_PATH" "$INSTALL_PATH"
 echo "==> installed $INSTALL_PATH"
 
 if [[ "$WAS_RUNNING" == "1" || "${1:-}" == "--launch" ]]; then
-  env -u GIT_PAGER -u GH_PAGER open "$INSTALL_PATH"
+  # why: `open` propagates env; CLAUDE*/CLAUDECODE from an agent shell makes
+  # resumed claudes think they're nested child sessions and they bail (blank pane)
+  UNSET_FLAGS=(-u GIT_PAGER -u GH_PAGER)
+  while IFS= read -r key; do UNSET_FLAGS+=(-u "$key"); done \
+    < <(env | grep -oE '^(CLAUDE[A-Z_]*|CLAUDECODE|ANTHROPIC[A-Z_]*|CMUX_[A-Z_]*)=' | sed 's/=$//')
+  env "${UNSET_FLAGS[@]}" open "$INSTALL_PATH"
   echo "==> relaunched; workspaces + agent sessions restore automatically"
 fi
 

@@ -307,3 +307,4 @@ Claudes debug this app after the fact from John's issue reports. Every feature m
 /usr/bin/log show --last 1d --predicate 'subsystem == "com.cmuxterm.app" AND category == "agent-resume"'
 ```
 Debug builds additionally: `tail -f "$(cat /tmp/cmux-last-debug-log-path 2>/dev/null || echo /tmp/cmux-debug.log)"` and the `cmux-debugging` skill.
+- **Env hygiene when launching the real cmux**: `open` propagates the caller's env. Launching /Applications/cmux.app from inside a claude/agent shell leaks `CLAUDECODE`/`CLAUDE_CODE_SESSION_ID`/etc into every pane — resumed claudes then think they're nested child sessions, show spurious allow/deny prompts, and exit (blank pane). `reloadp-local.sh` scrubs these; any other launch path must too (or launch from Dock/Spotlight).

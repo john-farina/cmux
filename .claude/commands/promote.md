@@ -10,22 +10,8 @@ Move the current fork changes into John's REAL cmux (`/Applications/cmux.app`) w
 
 ## Steps
 
-1. Build: `./scripts/reloadp-local.sh` (build-only; prints the Release app path)
-2. Verify the bundle: app path exists, `Contents/MacOS/cmux` executable present
-3. Archive the current app (rollback net, mirrors the ghostty gc-rollback pattern):
-   ```bash
-   ts=$(date +%Y%m%d-%H%M%S)
-   mkdir -p ~/.cmux-backups/apps/$ts
-   [ -d /Applications/cmux.app ] && ditto /Applications/cmux.app ~/.cmux-backups/apps/$ts/cmux.app
-   ls -dt ~/.cmux-backups/apps/*/ | tail -n +11 | xargs rm -rf   # keep last 10
-   ```
-4. Install: `rm -rf /Applications/cmux.app && ditto "<release app path>" /Applications/cmux.app`
-5. Restart gracefully (SIGTERM lets the final autosave land; never `kill -9`):
-   ```bash
-   osascript -e 'quit app "cmux"'; sleep 2
-   open /Applications/cmux.app
-   ```
-6. Verify: process running from `/Applications`, workspaces restored, agent panes resumed. If the new build fails to launch or restore, roll back immediately (below), then debug in a DEV build.
+1. `./scripts/reloadp-local.sh` — does everything: build, verify bundle, archive the current app to `~/.cmux-backups/apps/` (last 10 kept), install to /Applications, graceful quit + relaunch if cmux was running. Refuses to force-kill if cmux won't quit. `--no-install` for build-only.
+2. Verify: process running from `/Applications`, workspaces restored, agent panes resumed. If the new build fails to launch or restore, roll back immediately (below), then debug in a DEV build.
 
 ## Rollback
 

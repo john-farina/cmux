@@ -2,6 +2,7 @@
 # Usage: CMUX_TAG=<tag> scripts/dev-seed-sessions.sh [count=5]
 # why: opens the DEV build populated with `claude --resume` tabs; never picks
 # a session live elsewhere or active in the real build (double-resume unsafe).
+# The last two picks share one workspace as two terminal tabs (multi-tab mock).
 set -euo pipefail
 
 if [[ -z "${CMUX_TAG:-}" ]]; then
@@ -22,7 +23,12 @@ if [[ ! -S "$SOCK" ]]; then
   exit 1
 fi
 
-python3 - "$COUNT" <<'PYEOF' | while IFS=$'\t' read -r sid cwd; do
+SIDS=()
+CWDS=()
+while IFS=$'\t' read -r sid cwd; do
+  SIDS+=("$sid")
+  CWDS+=("$cwd")
+done < <(python3 - "$COUNT" <<'PYEOF'
 import glob, json, os, random, sys
 
 count = int(sys.argv[1])
@@ -80,8 +86,36 @@ for sid, cwd in candidates:
 for sid, cwd in picked:
     print(f"{sid}\t{cwd}")
 PYEOF
+)
+
+TOTAL=${#SIDS[@]}
+if (( TOTAL == 0 )); then
+  echo "no seedable sessions found (all live, active in the real build, or too small)" >&2
+  exit 0
+fi
+
+SINGLES=$TOTAL
+if (( TOTAL >= 3 )); then
+  SINGLES=$((TOTAL - 2))
+fi
+
+for ((i = 0; i < SINGLES; i++)); do
   CMUX_QUIET=1 "$SCRIPT_DIR/cmux-debug-cli.sh" workspace create \
-    --cwd "$cwd" \
-    --command "claude --resume $sid"
-  echo "seeded: $sid ($cwd)"
+    --cwd "${CWDS[$i]}" \
+    --command "claude --resume ${SIDS[$i]}"
+  echo "seeded: ${SIDS[$i]} (${CWDS[$i]})"
 done
+
+if (( TOTAL >= 3 )); then
+  A=$((TOTAL - 2)); B=$((TOTAL - 1))
+  LAYOUT=$(python3 -c '
+import json, sys
+print(json.dumps({"pane": {"surfaces": [
+    {"type": "terminal", "cwd": sys.argv[2], "command": "claude --resume " + sys.argv[1]},
+    {"type": "terminal", "cwd": sys.argv[4], "command": "claude --resume " + sys.argv[3]},
+]}}))' "${SIDS[$A]}" "${CWDS[$A]}" "${SIDS[$B]}" "${CWDS[$B]}")
+  CMUX_QUIET=1 "$SCRIPT_DIR/cmux-debug-cli.sh" workspace create \
+    --cwd "${CWDS[$A]}" \
+    --layout "$LAYOUT"
+  echo "seeded multi-tab: ${SIDS[$A]} + ${SIDS[$B]} (${CWDS[$A]})"
+fi

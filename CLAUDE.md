@@ -302,7 +302,8 @@ Claudes debug this app after the fact from John's issue reports. Every feature m
 
 **Reading logs when John reports an issue** (do this FIRST, before theorizing):
 ```bash
-log show --predicate 'subsystem == "com.cmuxterm.app"' --last 2h --style compact
-log show --predicate 'subsystem == "com.cmuxterm.app" AND category == "agent-resume"' --last 1d
+# /usr/bin/log, not bare `log` — zsh has a `log` builtin that shadows it
+/usr/bin/log show --last 2h --predicate 'subsystem == "com.cmuxterm.app"'
+/usr/bin/log show --last 1d --predicate 'subsystem == "com.cmuxterm.app" AND category == "agent-resume"'
 ```
 Debug builds additionally: `tail -f "$(cat /tmp/cmux-last-debug-log-path 2>/dev/null || echo /tmp/cmux-debug.log)"` and the `cmux-debugging` skill.

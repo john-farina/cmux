@@ -399,6 +399,20 @@ final class SessionPersistenceTests: XCTestCase {
         XCTAssertNil(store.load(fileURL: snapshotURL))
     }
 
+    // why: fields are additive optionals — a version bump must not destroy saved sessions.
+    func testLoadAcceptsOlderSchemaVersion() {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-session-tests-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let snapshotURL = tempDir.appendingPathComponent("session.json", isDirectory: false)
+        let store = sessionStore()
+        XCTAssertTrue(store.save(makeSnapshot(version: SessionSnapshotSchema.currentVersion - 1), fileURL: snapshotURL))
+
+        XCTAssertNotNil(store.load(fileURL: snapshotURL))
+    }
+
     func testDefaultSnapshotPathSanitizesBundleIdentifier() {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("cmux-session-tests-\(UUID().uuidString)", isDirectory: true)

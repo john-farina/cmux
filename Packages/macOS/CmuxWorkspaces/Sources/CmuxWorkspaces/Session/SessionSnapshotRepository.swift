@@ -57,7 +57,9 @@ public struct SessionSnapshotRepository<SnapshotValue: SessionSnapshotRepresenti
         guard let data = try? Data(contentsOf: fileURL) else { return .unusable }
         let decoder = JSONDecoder()
         guard let snapshot = try? decoder.decode(SnapshotValue.self, from: data) else { return .unusable }
-        guard snapshot.version == schemaVersion else { return .unusable }
+        // why: fields are additive optionals, so older snapshots decode fine — a version bump
+        // must not destroy every saved session. Only a NEWER (downgrade) version is unusable.
+        guard snapshot.version <= schemaVersion else { return .unusable }
         guard snapshot.hasWindows else { return .unusable }
         return .loaded(snapshot)
     }

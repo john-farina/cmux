@@ -5,6 +5,9 @@ extension CMUXCLI {
     /// Drives one auto-naming pass for a Claude session at turn end.
     /// `manual: true` (context-menu trigger) bypasses the enabled/user-owned/
     /// staleness/throttle gates — the user explicitly asked for a rename.
+    /// `panelOnly: true` names just the tab, leaving the workspace title to a
+    /// later all-tabs synthesis pass. Returns the applied title, if any.
+    @discardableResult
     func runClaudeAutoNameHook(
         parsedInput: ClaudeHookParsedInput,
         mappedSession: ClaudeHookSessionRecord?,
@@ -13,9 +16,10 @@ extension CMUXCLI {
         sessionStore: ClaudeHookSessionStore,
         client: SocketClient,
         telemetry: CLISocketSentryTelemetry,
-        manual: Bool = false
-    ) {
-        guard let sessionId = parsedInput.sessionId ?? (manual ? mappedSession?.sessionId : nil) else { return }
+        manual: Bool = false,
+        panelOnly: Bool = false
+    ) -> String? {
+        guard let sessionId = parsedInput.sessionId ?? (manual ? mappedSession?.sessionId : nil) else { return nil }
         let env = ProcessInfo.processInfo.environment
         let probe = (try? client.sendV2(
             method: "workspace.set_auto_title",
@@ -24,18 +28,18 @@ extension CMUXCLI {
         if !manual {
             guard probe["enabled"] as? Bool == true else {
                 telemetry.breadcrumb("claude-hook.auto-name.disabled")
-                return
+                return nil
             }
             guard probe["workspace_user_owned"] as? Bool != true else {
                 telemetry.breadcrumb("claude-hook.auto-name.user-owned")
-                return
+                return nil
             }
         }
 
         let claudePid = mappedSession?.pid ?? claudeAgentPID(from: env)
         guard !shouldSuppressNestedAgentVisibleMutations(currentAgentPID: claudePid, env: env) else {
             telemetry.breadcrumb("claude-hook.auto-name.nested-suppressed")
-            return
+            return nil
         }
         guard manual || shouldApplyClaudeHookVisibleMutation(
             sessionStore: sessionStore,
@@ -45,12 +49,12 @@ extension CMUXCLI {
             telemetry: telemetry
         ) else {
             telemetry.breadcrumb("claude-hook.auto-name.stale")
-            return
+            return nil
         }
 
-        guard let transcriptPath = parsedInput.transcriptPath ?? mappedSession?.transcriptPath else { return }
+        guard let transcriptPath = parsedInput.transcriptPath ?? mappedSession?.transcriptPath else { return nil }
         guard let lines = readRecentTextFileLines(path: transcriptPath, maxBytes: 512 * 1024), !lines.isEmpty else {
-            return
+            return nil
         }
         let lineCount = textFileGrowthMetric(path: transcriptPath, fallbackLineCount: lines.count)
         let engine = AutoNamingEngine()
@@ -61,7 +65,7 @@ extension CMUXCLI {
             transcriptLineCount: lineCount,
             now: Date(),
             engine: engine
-        ) else { return }
+        ) else { return nil }
         let baseline: Int
         switch outcome.decision {
         case .proceed(let value):
@@ -69,7 +73,7 @@ extension CMUXCLI {
         default:
             guard manual else {
                 telemetry.breadcrumb("claude-hook.auto-name.throttled")
-                return
+                return nil
             }
             baseline = lineCount
         }
@@ -85,7 +89,7 @@ extension CMUXCLI {
         }
 
         let messages = engine.extractMessages(fromTranscriptLines: lines)
-        guard let context = engine.buildContext(from: messages) else { return }
+        guard let context = engine.buildContext(from: messages) else { return nil }
         let prompt = engine.buildPrompt(currentTitle: outcome.lastTitle, context: context)
 
         let resolution = resolvedSummarizerAgent(
@@ -100,10 +104,10 @@ extension CMUXCLI {
         ) else {
             telemetry.breadcrumb("claude-hook.auto-name.llm-failed")
             reportAutoNamingProblem("failed", agent: resolution.agent, workspaceId: workspaceId, client: client)
-            return
+            return nil
         }
 
-        guard let sanitized = engine.sanitizeResponse(rawResponse, currentTitle: nil) else { return }
+        guard let sanitized = engine.sanitizeResponse(rawResponse, currentTitle: nil) else { return nil }
         confirmedTitle = applyAutoNamingTitle(
             sanitized,
             workspaceId: workspaceId,
@@ -112,13 +116,108 @@ extension CMUXCLI {
             client: client,
             telemetryKey: "claude-hook.auto-name",
             telemetry: telemetry,
-            manual: manual
+            manual: manual,
+            panelOnly: panelOnly
         )
         // Re-report a missing override only after the fallback apply, so the
         // app's clear-on-apply doesn't immediately wipe the Settings note.
         if confirmedTitle != nil, let missing = resolution.missingOverride {
             reportAutoNamingProblem("not_installed", agent: missing, workspaceId: workspaceId, client: client)
         }
+        return confirmedTitle
+    }
+
+    /// Manual workspace-wide naming: one panel-only pass per tab with an
+    /// active session, then a workspace title synthesized from all tab names.
+    /// Always resolves the sidebar's loading pill — failure is reported when
+    /// nothing could be named.
+    func runManualWorkspaceAutoName(
+        actives: [(surfaceId: String, record: ClaudeHookSessionRecord)],
+        parsedInput: ClaudeHookParsedInput,
+        workspaceId: String,
+        sessionStore: ClaudeHookSessionStore,
+        client: SocketClient,
+        telemetry: CLISocketSentryTelemetry
+    ) {
+        guard !actives.isEmpty else {
+            telemetry.breadcrumb("claude-hook.auto-name.manual-no-active")
+            reportAutoNamingProblem("no_agent", agent: "claude", workspaceId: workspaceId, client: client)
+            return
+        }
+        if actives.count == 1 {
+            let entry = actives[0]
+            let title = runClaudeAutoNameHook(
+                parsedInput: parsedInput,
+                mappedSession: entry.record,
+                workspaceId: workspaceId,
+                surfaceId: entry.surfaceId,
+                sessionStore: sessionStore,
+                client: client,
+                telemetry: telemetry,
+                manual: true
+            )
+            if title == nil {
+                reportAutoNamingProblem("failed", agent: "claude", workspaceId: workspaceId, client: client)
+            }
+            return
+        }
+
+        var tabTitles: [String] = []
+        for entry in actives {
+            if let title = runClaudeAutoNameHook(
+                parsedInput: parsedInput,
+                mappedSession: entry.record,
+                workspaceId: workspaceId,
+                surfaceId: entry.surfaceId,
+                sessionStore: sessionStore,
+                client: client,
+                telemetry: telemetry,
+                manual: true,
+                panelOnly: true
+            ) {
+                tabTitles.append(title)
+            }
+        }
+        guard !tabTitles.isEmpty else {
+            reportAutoNamingProblem("failed", agent: "claude", workspaceId: workspaceId, client: client)
+            return
+        }
+
+        let env = ProcessInfo.processInfo.environment
+        let engine = AutoNamingEngine()
+        let probe = (try? client.sendV2(
+            method: "workspace.set_auto_title",
+            params: ["probe": true, "workspace_id": workspaceId]
+        )) ?? [:]
+        let resolution = resolvedSummarizerAgent(
+            probe: probe, sessionAgent: "claude", env: env, telemetry: telemetry
+        )
+        let list = tabTitles.map { "- \($0)" }.joined(separator: "\n")
+        let prompt = """
+        These terminal tabs run in one workspace:
+        \(list)
+
+        Respond with ONLY a 2-5 word name describing the workspace's overall work. No punctuation, no quotes, no explanation.
+        """
+        let synthesized = summarize(
+            summarizerAgent: resolution.agent,
+            prompt: prompt,
+            env: env,
+            timeout: engine.config.llmTimeout,
+            telemetry: telemetry
+        ).flatMap { engine.sanitizeResponse($0, currentTitle: nil) }
+        // why: a failed synthesis still resolves the pill — first tab title stands in
+        let workspaceTitle = synthesized ?? tabTitles[0]
+        _ = applyAutoNamingTitle(
+            workspaceTitle,
+            workspaceId: workspaceId,
+            surfaceId: nil,
+            previousTitle: nil,
+            client: client,
+            telemetryKey: "claude-hook.auto-name.synthesis",
+            telemetry: telemetry,
+            manual: true
+        )
     }
 
     /// Spawns a detached generic-agent auto-name pass via a bounded shell wrapper.

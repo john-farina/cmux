@@ -258,24 +258,29 @@ extension CMUXCLI {
     func applyAutoNamingTitle(
         _ title: String,
         workspaceId: String,
-        surfaceId: String,
+        surfaceId: String?,
         previousTitle: String?,
         client: SocketClient,
         telemetryKey: String,
         telemetry: CLISocketSentryTelemetry,
-        manual: Bool = false
+        manual: Bool = false,
+        panelOnly: Bool = false
     ) -> String? {
-        guard let payload = try? client.sendV2(method: "workspace.set_auto_title", params: [
+        var params: [String: Any] = [
             "workspace_id": workspaceId,
-            "panel_id": surfaceId,
             "panel_only_if_multiple": true,
             "title": title,
-            "manual": manual
-        ]) else {
+            "manual": manual,
+            "panel_only": panelOnly
+        ]
+        if let surfaceId {
+            params["panel_id"] = surfaceId
+        }
+        guard let payload = try? client.sendV2(method: "workspace.set_auto_title", params: params) else {
             telemetry.breadcrumb("\(telemetryKey).socket-failed")
             return nil
         }
-        if payload["workspace_applied"] as? Bool == true {
+        if payload["workspace_applied"] as? Bool == true || (panelOnly && payload["panel_applied"] as? Bool == true) {
             telemetry.breadcrumb("\(telemetryKey).applied")
             return title
         }

@@ -3760,6 +3760,15 @@ class TerminalController {
                 agent: v2String(params, "agent") ?? "",
                 at: Date().timeIntervalSince1970
             )
+            // A failure resolves the sidebar's "Naming…" pill, if one is up.
+            if let workspaceId = v2UUID(params, "workspace_id"),
+               let tabManager = v2ResolveTabManager(params: params) {
+                v2MainSync {
+                    guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }),
+                          workspace.hasAutoNamingWorkingStatus else { return }
+                    workspace.setAutoNamingFailedStatus()
+                }
+            }
             return .ok(["recorded": true, "enabled": true])
         }
         guard let tabManager = v2ResolveTabManager(params: params) else {
@@ -3779,13 +3788,19 @@ class TerminalController {
         var found = false
         var workspaceApplied = false
         var panelApplied: Bool?
+        let panelOnly = v2Bool(params, "panel_only") ?? false
         v2MainSync {
             guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else { return }
             found = true
-            if manual, workspace.effectiveCustomTitleSource == .user {
-                tabManager.clearCustomTitle(tabId: workspaceId)
+            if !panelOnly {
+                if manual, workspace.effectiveCustomTitleSource == .user {
+                    tabManager.clearCustomTitle(tabId: workspaceId)
+                }
+                workspaceApplied = tabManager.setCustomTitle(tabId: workspaceId, title: title, source: .auto)
+                if workspaceApplied {
+                    workspace.clearAutoNamingStatus()
+                }
             }
-            workspaceApplied = tabManager.setCustomTitle(tabId: workspaceId, title: title, source: .auto)
             if let panelId {
                 // Hook payloads carry surface ids; accept either a panel id
                 // or a surface id for the tab target.

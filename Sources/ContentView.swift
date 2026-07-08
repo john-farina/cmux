@@ -14658,6 +14658,15 @@ struct TabItemView: View, Equatable {
             preferredPath: SocketControlSettings.socketPath()
         )
         for workspaceId in workspaceIds {
+            if let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) {
+                workspace.setAutoNamingWorkingStatus()
+                // Backstop: the CLI reports success or failure through
+                // set_auto_title, but if it dies the pill must still resolve.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak workspace] in
+                    guard let workspace, workspace.hasAutoNamingWorkingStatus else { return }
+                    workspace.setAutoNamingFailedStatus()
+                }
+            }
             let process = Process()
             process.executableURL = cliURL
             process.arguments = [
@@ -14682,6 +14691,7 @@ struct TabItemView: View, Equatable {
                 CmuxLog.agentResume.log("auto-name.manual.spawned workspace=\(workspaceId.uuidString, privacy: .public)")
             } catch {
                 CmuxLog.agentResume.error("auto-name.manual.spawn-failed workspace=\(workspaceId.uuidString, privacy: .public)")
+                tabManager.tabs.first(where: { $0.id == workspaceId })?.setAutoNamingFailedStatus()
                 NSSound.beep()
             }
         }

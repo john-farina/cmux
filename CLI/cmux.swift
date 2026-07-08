@@ -24538,23 +24538,16 @@ struct CMUXCLI {
                     client: client
                 )
                 if manual, mappedSession == nil, hookSurfaceFlag == nil {
-                    // why: workspace-wide manual trigger names each tab separately
+                    // why: workspace-wide manual trigger names each tab, then the workspace
                     let actives = (try? sessionStore.activeSessionRecords(workspaceId: workspaceId)) ?? []
-                    for entry in actives {
-                        runClaudeAutoNameHook(
-                            parsedInput: parsedInput,
-                            mappedSession: entry.record,
-                            workspaceId: workspaceId,
-                            surfaceId: entry.surfaceId,
-                            sessionStore: sessionStore,
-                            client: client,
-                            telemetry: telemetry,
-                            manual: true
-                        )
-                    }
-                    if actives.isEmpty {
-                        telemetry.breadcrumb("claude-hook.auto-name.manual-no-active")
-                    }
+                    runManualWorkspaceAutoName(
+                        actives: actives,
+                        parsedInput: parsedInput,
+                        workspaceId: workspaceId,
+                        sessionStore: sessionStore,
+                        client: client,
+                        telemetry: telemetry
+                    )
                     print("OK")
                     return
                 }

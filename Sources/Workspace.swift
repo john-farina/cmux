@@ -2309,6 +2309,42 @@ final class Workspace: Identifiable, ObservableObject {
 
     private static let remoteErrorStatusKey = "remote.error"
     private static let remotePortConflictStatusKey = "remote.port_conflicts"
+    static let autoNamingStatusKey = "auto-naming"
+
+    /// Sidebar pill for a manual auto-naming pass: working → cleared on the
+    /// applied title, or flipped to a failure that fades after a few seconds.
+    func setAutoNamingWorkingStatus() {
+        statusEntries[Self.autoNamingStatusKey] = SidebarStatusEntry(
+            key: Self.autoNamingStatusKey,
+            value: String(localized: "autoNaming.status.working", defaultValue: "Naming…"),
+            icon: "sparkles",
+            color: nil,
+            timestamp: Date()
+        )
+    }
+
+    var hasAutoNamingWorkingStatus: Bool {
+        statusEntries[Self.autoNamingStatusKey]?.icon == "sparkles"
+    }
+
+    func setAutoNamingFailedStatus() {
+        let stamp = Date()
+        statusEntries[Self.autoNamingStatusKey] = SidebarStatusEntry(
+            key: Self.autoNamingStatusKey,
+            value: String(localized: "autoNaming.status.failed", defaultValue: "Auto-name failed"),
+            icon: "exclamationmark.triangle.fill",
+            color: "#FF453A",
+            timestamp: stamp
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            guard let self, self.statusEntries[Self.autoNamingStatusKey]?.timestamp == stamp else { return }
+            self.clearAutoNamingStatus()
+        }
+    }
+
+    func clearAutoNamingStatus() {
+        statusEntries.removeValue(forKey: Self.autoNamingStatusKey)
+    }
     private static let remoteNotificationCooldown: TimeInterval = 5 * 60
     private static let sshControlMasterCleanupQueue = DispatchQueue(
         label: "com.cmux.remote-ssh.control-master-cleanup",

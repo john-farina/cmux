@@ -15,7 +15,7 @@ extension Notification.Name {
 extension cmuxApp {
     @CommandsBuilder
     var forkCommands: some Commands {
-        CommandMenu(String(localized: "menu.fork.title", defaultValue: "Fork")) {
+        CommandMenu(String(localized: "menu.fork.title", defaultValue: "Toolbelt")) {
             Button(String(
                 localized: "command.externalSessions.import.title",
                 defaultValue: "Import Claude Sessions from Other Terminals…"

@@ -1441,6 +1441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if !isRunningUnderXCTest {
             configureUserNotifications()
             installMenuBarVisibilityObserver()
+            installToolbeltMenuRepositioner()
             syncApplicationPresentationPreferences()
             updateController.actionDelegate = self
             updateController.startUpdaterIfNeeded()
@@ -15880,6 +15881,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func disableNativeTabbingShortcut() {
         guard let menu = NSApp.mainMenu else { return }
         disableMenuItemShortcut(in: menu, action: #selector(NSWindow.toggleTabBar(_:)))
+    }
+
+    // why: SwiftUI offers no CommandMenu placement, so Toolbelt is re-moved next to File
+    // on every menu rebuild; the flag coalesces didAddItem storms and the index guard converges.
+    private var toolbeltMenuRepositionScheduled = false
+
+    func installToolbeltMenuRepositioner() {
+        NotificationCenter.default.addObserver(
+            forName: NSMenu.didAddItemNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let menu = note.object as? NSMenu, menu === NSApp.mainMenu else { return }
+            MainActor.assumeIsolated {
+                self?.scheduleToolbeltMenuReposition()
+            }
+        }
+        scheduleToolbeltMenuReposition()
+    }
+
+    private func scheduleToolbeltMenuReposition() {
+        guard !toolbeltMenuRepositionScheduled else { return }
+        toolbeltMenuRepositionScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            self?.toolbeltMenuRepositionScheduled = false
+            self?.repositionToolbeltMenu()
+        }
+    }
+
+    private func repositionToolbeltMenu() {
+        guard let mainMenu = NSApp.mainMenu else { return }
+        let title = String(localized: "menu.fork.title", defaultValue: "Toolbelt")
+        let targetIndex = min(2, mainMenu.items.count)
+        guard let currentIndex = mainMenu.items.firstIndex(where: { $0.title == title }),
+              currentIndex != targetIndex else { return }
+        let item = mainMenu.items[currentIndex]
+        mainMenu.removeItem(item)
+        mainMenu.insertItem(item, at: currentIndex < targetIndex ? targetIndex - 1 : targetIndex)
     }
 
     private func disableMenuItemShortcut(in menu: NSMenu, action: Selector) {

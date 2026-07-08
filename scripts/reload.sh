@@ -1010,7 +1010,22 @@ fi
 if command -v xattr >/dev/null 2>&1; then
   xattr -cr "$APP_PATH" || true
 fi
-if ! /usr/bin/codesign --force --sign - --timestamp=none --generate-entitlement-der "$APP_PATH" >/dev/null 2>&1; then
+# why: ad-hoc signatures change every rebuild, so macOS TCC re-prompts for
+# every permission each time. A stable Apple Development identity keeps the
+# designated requirement constant and permissions persist across rebuilds.
+DEV_SIGN_IDENTITY="${CMUX_DEV_CODESIGN_IDENTITY:-}"
+if [[ -z "$DEV_SIGN_IDENTITY" ]]; then
+  DEV_SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*\([0-9A-F]\{40\}\) "Apple Development.*/\1/p' | head -1)"
+fi
+if [[ -z "$DEV_SIGN_IDENTITY" ]]; then
+  DEV_SIGN_IDENTITY="-"
+fi
+if ! /usr/bin/codesign --force --sign "$DEV_SIGN_IDENTITY" --timestamp=none --generate-entitlement-der "$APP_PATH" >/dev/null 2>&1; then
+  # Identity signing can fail (expired cert, keychain locked); ad-hoc still works.
+  DEV_SIGN_IDENTITY="-"
+fi
+if ! /usr/bin/codesign --force --sign "$DEV_SIGN_IDENTITY" --timestamp=none --generate-entitlement-der "$APP_PATH" >/dev/null 2>&1; then
   if [[ "${CMUX_ALLOW_UNSIGNED_DEV_APP:-}" == "1" ]]; then
     echo "warning: codesign failed for $APP_PATH; continuing because CMUX_ALLOW_UNSIGNED_DEV_APP=1" >&2
   else

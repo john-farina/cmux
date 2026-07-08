@@ -222,6 +222,7 @@ extension TerminalSurface {
             ghostty_surface_set_size(surface, wpx, hpx)
             lastPixelWidth = wpx
             lastPixelHeight = hpx
+            scheduleDeferredInitialInputSend()
             if manualIO {
                 // Async refresh, not render_now: render_now runs updateFrame on
                 // the main thread and races the always-live macOS renderer

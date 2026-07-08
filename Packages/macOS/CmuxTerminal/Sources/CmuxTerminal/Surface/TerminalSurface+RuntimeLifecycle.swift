@@ -565,6 +565,7 @@ extension TerminalSurface {
         if runtimeInitialInput != nil {
             nextRuntimeInitialInput = nil
         }
+        scheduleDeferredInitialInputSend()
 
         // Session scrollback replay must be one-shot. Reusing it on a later runtime
         // surface recreation would inject stale restored output into a live shell.

@@ -249,12 +249,18 @@ extension TerminalSurface {
             }
             return baseConfig.initialInput
         }()
+        // why: spawn-time input boots the agent TUI mid-layout-churn (stale rows); paced
+        // session-restore surfaces send it via sendText once the size settles instead.
+        let spawnInitialInput = requiresRestoreSpawnPacing ? nil : resolvedInitialInput
+        if requiresRestoreSpawnPacing, let resolvedInitialInput, !resolvedInitialInput.isEmpty {
+            pendingDeferredInitialInput = resolvedInitialInput
+        }
 
         let createdSurface = withOptionalCString(resolvedCommand) { cCommand in
             surfaceConfig.command = cCommand
             return withOptionalCString(resolvedWorkingDirectory) { cWorkingDir in
                 surfaceConfig.working_directory = cWorkingDir
-                return withOptionalCString(resolvedInitialInput) { cInitialInput in
+                return withOptionalCString(spawnInitialInput) { cInitialInput in
                     surfaceConfig.initial_input = cInitialInput
                     return makeGhosttySurface(app: app, config: &surfaceConfig, envVars: &envVars)
                 }

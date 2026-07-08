@@ -230,6 +230,11 @@ public final class TerminalSurface: Identifiable, ObservableObject {
     var paneHostAttachCreationSource: RuntimeSurfaceCreationSource = .normal
     var restoredRuntimeSurfaceStartQueued = false
     var requiresRestoreSpawnPacing = false
+    // why: restored-agent input typed at spawn boots the TUI during layout churn and it
+    // draws at stale rows; paced-restore surfaces hold it until the size settles.
+    var pendingDeferredInitialInput: String?
+    var deferredInitialInputWorkItem: DispatchWorkItem?
+    var deferredInitialInputDeadline: Date?
     var runtimeSurfaceSuspendedForAgentHibernation = false
     var headlessStartupWindow: NSWindow?
     var surfaceCallbackContext: Unmanaged<GhosttySurfaceCallbackContext>?

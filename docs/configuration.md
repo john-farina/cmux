@@ -253,7 +253,7 @@ Opt-in AI auto-naming of workspaces and tabs from agent conversation content. Wh
 }
 ```
 
-Default: `false`. Manual renames (sidebar, command palette, CLI, or `/rename`) always win: a workspace or tab you renamed yourself is never auto-named again until you clear its custom name. Enable it from **Settings > Automation > Workspace Auto-Naming**.
+Default: `true`. Manual renames (sidebar, command palette, CLI, or `/rename`) always win: a workspace or tab you renamed yourself is never auto-named again until you clear its custom name or explicitly right-click > Auto-Name Workspace. Disable it from **Settings > Automation > Workspace Auto-Naming**.
 
 ## `diffViewer.defaultLayout`
 

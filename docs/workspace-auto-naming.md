@@ -1,8 +1,8 @@
 # Workspace auto-naming
 
-Opt-in AI naming of sidebar workspaces and tabs from agent conversation content. With several concurrent agent sessions, the sidebar otherwise shows identical rows ("Claude Code", "codex"); auto-naming turns them into short, topic-bearing names that refresh as each conversation moves.
+AI naming of sidebar workspaces and tabs from agent conversation content. With several concurrent agent sessions, the sidebar otherwise shows identical rows ("Claude Code", "codex"); auto-naming turns them into short, topic-bearing names that refresh as each conversation moves.
 
-Off by default. Enable it in **Settings > Automation > Workspace Auto-Naming** or via `automation.workspaceAutoNaming` in `cmux.json` (see [configuration.md](configuration.md#automationworkspaceautonaming)).
+On by default; manual renames always win and stop auto-naming for that workspace/tab until cleared or explicitly re-applied (right-click > Auto-Name Workspace). Disable it in **Settings > Automation > Workspace Auto-Naming** or via `automation.workspaceAutoNaming` in `cmux.json` (see [configuration.md](configuration.md#automationworkspaceautonaming)).
 
 ## What it does
 

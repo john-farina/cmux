@@ -25,12 +25,13 @@ public struct AutomationCatalogSection: SettingCatalogSection {
         userDefaultsKey: "claudeCodeCustomClaudePath"
     )
 
-    /// Opt-in AI auto-naming of workspaces and tabs from agent conversation
-    /// content. Default off: enabling it lets cmux run the user's own agent
-    /// binary (`claude -p` / `codex exec`) to summarize sessions into titles.
+    /// AI auto-naming of workspaces and tabs from agent conversation content
+    /// (cmux runs the user's own agent binary, `claude -p` / `codex exec`, to
+    /// summarize sessions into titles). Fork default ON: manual renames always
+    /// win and are never auto-overwritten, so naming only ever fills gaps.
     public let workspaceAutoNaming = DefaultsKey<Bool>(
         id: "automation.workspaceAutoNaming",
-        defaultValue: false,
+        defaultValue: true,
         userDefaultsKey: "workspaceAutoNamingEnabled"
     )
 

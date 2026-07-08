@@ -2371,6 +2371,23 @@ final class CmuxConfigStore: ObservableObject {
         fallback.merging(primary) { _, primary in primary }
     }
 
+    /// Agent launch templates as (action id, ready-localized display title)
+    /// for the fork's native menu; mirrors the palette contribution titles.
+    func agentTemplateMenuEntries() -> [(id: String, title: String)] {
+        loadedActions
+            .filter { templateActionIDs.contains($0.id) }
+            .compactMap { action in
+                guard let name = action.workspaceCommandName else { return nil }
+                return (
+                    id: action.id,
+                    title: String(
+                        localized: "command.cmuxConfig.templateTitle",
+                        defaultValue: "New Agent: \(sanitizeConfigText(name))"
+                    )
+                )
+            }
+    }
+
     private func sanitizeConfigText(_ text: String) -> String {
         let dangerous: Set<Unicode.Scalar> = [
             "\u{200B}", "\u{200C}", "\u{200D}", "\u{200E}", "\u{200F}",

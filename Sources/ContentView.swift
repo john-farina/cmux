@@ -2832,6 +2832,41 @@ struct ContentView: View {
             openCommandPaletteCommands()
         })
 
+        view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: .forkImportExternalSessionsRequested)) { notification in
+            guard Self.shouldHandleCommandPaletteRequest(
+                observedWindow: observedWindow,
+                requestedWindow: notification.object as? NSWindow,
+                keyWindow: NSApp.keyWindow,
+                mainWindow: NSApp.mainWindow
+            ) else { return }
+            presentExternalSessionImport()
+        })
+
+        view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: .forkAutoNameWorkspaceRequested)) { notification in
+            guard Self.shouldHandleCommandPaletteRequest(
+                observedWindow: observedWindow,
+                requestedWindow: notification.object as? NSWindow,
+                keyWindow: NSApp.keyWindow,
+                mainWindow: NSApp.mainWindow
+            ) else { return }
+            guard let workspaceId = tabManager.selectedWorkspace?.id else {
+                NSSound.beep()
+                return
+            }
+            triggerManualWorkspaceAutoName(workspaceIds: [workspaceId], tabManager: tabManager)
+        })
+
+        view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: .forkRunConfiguredActionRequested)) { notification in
+            guard Self.shouldHandleCommandPaletteRequest(
+                observedWindow: observedWindow,
+                requestedWindow: notification.object as? NSWindow,
+                keyWindow: NSApp.keyWindow,
+                mainWindow: NSApp.mainWindow
+            ) else { return }
+            guard let actionId = notification.userInfo?["actionId"] as? String else { return }
+            _ = executeConfiguredAction(id: actionId)
+        })
+
         view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: .savedLayoutSaveRequested)) { notification in
             if Self.shouldHandleSavedLayoutSaveRequest(observedWindow: observedWindow, requestedWindow: notification.object as? NSWindow, keyWindow: NSApp.keyWindow, mainWindow: NSApp.mainWindow) {
                 presentSavedLayoutSavePrompt()
@@ -14652,71 +14687,7 @@ struct TabItemView: View, Equatable {
     /// workspace (`cmux hooks claude auto-name --manual`). Detached: the
     /// summarizer LLM call must never block the UI.
     private func triggerManualAutoName(workspaceIds: [UUID]) {
-        guard let cliURL = Bundle.main.resourceURL?.appendingPathComponent("bin/cmux"),
-              FileManager.default.isExecutableFile(atPath: cliURL.path) else {
-            NSSound.beep()
-            return
-        }
-        let socketPath = TerminalController.shared.activeSocketPath(
-            preferredPath: SocketControlSettings.socketPath()
-        )
-        for workspaceId in workspaceIds {
-            // why: hook store lags restarts — the app passes its own panel→session pairs
-            var sessionPairs: [String] = []
-            if let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) {
-                workspace.setAutoNamingWorkingStatus()
-                // Backstop: the CLI reports success or failure through
-                // set_auto_title, but if it dies the pill must still resolve.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak workspace] in
-                    guard let workspace, workspace.hasAutoNamingWorkingStatus else { return }
-                    workspace.setAutoNamingFailedStatus()
-                }
-                for panelId in workspace.panels.keys {
-                    var sessionId = SharedLiveAgentIndex.shared
-                        .snapshot(workspaceId: workspaceId, panelId: panelId)
-                        .flatMap { $0.kind == .claude ? $0.sessionId : nil }
-                    if sessionId == nil,
-                       let binding = workspace.surfaceResumeBindingsByPanelId[panelId],
-                       binding.kind == RestorableAgentKind.claude.rawValue {
-                        sessionId = binding.checkpointId
-                    }
-                    if let sessionId, !sessionId.isEmpty {
-                        sessionPairs.append("\(sessionId)@\(panelId.uuidString)")
-                    }
-                }
-            }
-            let process = Process()
-            process.executableURL = cliURL
-            var arguments = [
-                "--socket", socketPath,
-                "hooks", "claude", "auto-name",
-                "--workspace", workspaceId.uuidString,
-                "--manual",
-            ]
-            if !sessionPairs.isEmpty {
-                arguments.append(contentsOf: ["--sessions", sessionPairs.joined(separator: ",")])
-            }
-            process.arguments = arguments
-            var environment = ProcessInfo.processInfo.environment
-            environment["CMUX_SOCKET_PATH"] = socketPath
-            environment["CMUX_BUNDLED_CLI_PATH"] = cliURL.path
-            environment.removeValue(forKey: "CMUX_SOCKET")
-            environment.removeValue(forKey: "CMUX_WORKSPACE_ID")
-            environment.removeValue(forKey: "CMUX_SURFACE_ID")
-            process.environment = environment
-            process.standardInput = FileHandle.nullDevice
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            process.terminationHandler = { _ in }
-            do {
-                try process.run()
-                CmuxLog.agentResume.log("auto-name.manual.spawned workspace=\(workspaceId.uuidString, privacy: .public)")
-            } catch {
-                CmuxLog.agentResume.error("auto-name.manual.spawn-failed workspace=\(workspaceId.uuidString, privacy: .public)")
-                tabManager.tabs.first(where: { $0.id == workspaceId })?.setAutoNamingFailedStatus()
-                NSSound.beep()
-            }
-        }
+        triggerManualWorkspaceAutoName(workspaceIds: workspaceIds, tabManager: tabManager)
     }
 
     private func closeTabs(_ targetIds: [UUID], allowPinned: Bool) {

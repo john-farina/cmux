@@ -125,7 +125,10 @@ struct MacAuthComposition {
             sessionFactory: ASWebBrowserAuthSessionFactory(anchor: anchor),
             callbackRouter: callbackRouter,
             makeSignInURL: { AuthEnvironment.signInURL(callbackState: $0) },
-            callbackScheme: { AuthEnvironment.callbackScheme }
+            callbackScheme: { AuthEnvironment.callbackScheme },
+            // fork why: ASWeb sheet self-dismisses in ~3s on this setup —
+            // show the open-in-browser fallback fast, not after 30s.
+            slowSignInThreshold: 5
         )
     }
 

@@ -45,6 +45,10 @@ extension cmuxApp {
                     NSSound.beep()
                     return
                 }
+                // fork why: the pairing window owns the open-in-browser
+                // fallback UI; a bare beginSignIn strands the user when the
+                // ASWeb sheet self-dismisses.
+                MobilePairingWindowController.shared.show()
                 auth.browserSignIn.beginSignIn()
             }
             Button(String(

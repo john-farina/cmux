@@ -130,7 +130,9 @@ extension CMUXCLI {
                 "--disable-slash-commands",
                 "--no-session-persistence",
                 "--strict-mcp-config",
-                "--mcp-config", "{}"
+                // claude >= 2.1.x validates the schema: an empty config must
+                // still carry the mcpServers record.
+                "--mcp-config", "{\"mcpServers\":{}}"
             ],
             prompt: prompt,
             environment: policy.summarizerEnvironment(from: env),

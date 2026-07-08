@@ -1,5 +1,10 @@
 import Darwin
 import Foundation
+import os
+
+// why: manual naming runs in a detached CLI; os_log is its only locally
+// readable trail (`log show --predicate 'subsystem == "com.cmuxterm.app"'`)
+private let manualAutoNameLog = Logger(subsystem: "com.cmuxterm.app", category: "agent-resume")
 
 extension CMUXCLI {
     /// Drives one auto-naming pass for a Claude session at turn end.
@@ -52,8 +57,15 @@ extension CMUXCLI {
             return nil
         }
 
-        guard let transcriptPath = parsedInput.transcriptPath ?? mappedSession?.transcriptPath else { return nil }
+        let resolvedTranscriptPath = parsedInput.transcriptPath
+            ?? mappedSession?.transcriptPath
+            ?? (manual ? Self.claudeTranscriptPathBySessionId(sessionId) : nil)
+        guard let transcriptPath = resolvedTranscriptPath else {
+            if manual { manualAutoNameLog.log("auto-name.pass.no-transcript-path session=\(sessionId, privacy: .public)") }
+            return nil
+        }
         guard let lines = readRecentTextFileLines(path: transcriptPath, maxBytes: 512 * 1024), !lines.isEmpty else {
+            if manual { manualAutoNameLog.log("auto-name.pass.transcript-unreadable session=\(sessionId, privacy: .public)") }
             return nil
         }
         let lineCount = textFileGrowthMetric(path: transcriptPath, fallbackLineCount: lines.count)
@@ -89,7 +101,10 @@ extension CMUXCLI {
         }
 
         let messages = engine.extractMessages(fromTranscriptLines: lines)
-        guard let context = engine.buildContext(from: messages) else { return nil }
+        guard let context = engine.buildContext(from: messages) else {
+            if manual { manualAutoNameLog.log("auto-name.pass.no-context session=\(sessionId, privacy: .public) lines=\(lines.count, privacy: .public)") }
+            return nil
+        }
         let prompt = engine.buildPrompt(currentTitle: outcome.lastTitle, context: context)
 
         let resolution = resolvedSummarizerAgent(
@@ -103,11 +118,15 @@ extension CMUXCLI {
             telemetry: telemetry
         ) else {
             telemetry.breadcrumb("claude-hook.auto-name.llm-failed")
+            if manual { manualAutoNameLog.log("auto-name.pass.llm-failed session=\(sessionId, privacy: .public) agent=\(resolution.agent, privacy: .public)") }
             reportAutoNamingProblem("failed", agent: resolution.agent, workspaceId: workspaceId, client: client)
             return nil
         }
 
-        guard let sanitized = engine.sanitizeResponse(rawResponse, currentTitle: nil) else { return nil }
+        guard let sanitized = engine.sanitizeResponse(rawResponse, currentTitle: nil) else {
+            if manual { manualAutoNameLog.log("auto-name.pass.sanitize-rejected session=\(sessionId, privacy: .public)") }
+            return nil
+        }
         confirmedTitle = applyAutoNamingTitle(
             sanitized,
             workspaceId: workspaceId,
@@ -127,6 +146,27 @@ extension CMUXCLI {
         return confirmedTitle
     }
 
+    /// Transcript lookup by session id alone (`~/.claude/projects/*/<id>.jsonl`)
+    /// for manual passes where the hook store has no record yet.
+    static func claudeTranscriptPathBySessionId(_ sessionId: String) -> String? {
+        let projects = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+        guard let dirs = try? FileManager.default.contentsOfDirectory(
+            at: projects, includingPropertiesForKeys: nil
+        ) else { return nil }
+        var newest: (path: String, mtime: Date)?
+        for dir in dirs {
+            let candidate = dir.appendingPathComponent("\(sessionId).jsonl")
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: candidate.path),
+                  let mtime = attrs[.modificationDate] as? Date else { continue }
+            if newest == nil || mtime > newest!.mtime {
+                newest = (candidate.path, mtime)
+            }
+        }
+        return newest?.path
+    }
+
     /// Manual workspace-wide naming: one panel-only pass per tab with an
     /// active session, then a workspace title synthesized from all tab names.
     /// Always resolves the sidebar's loading pill — failure is reported when
@@ -139,8 +179,10 @@ extension CMUXCLI {
         client: SocketClient,
         telemetry: CLISocketSentryTelemetry
     ) {
+        manualAutoNameLog.log("auto-name.manual.start workspace=\(workspaceId, privacy: .public) tabs=\(actives.count, privacy: .public)")
         guard !actives.isEmpty else {
             telemetry.breadcrumb("claude-hook.auto-name.manual-no-active")
+            manualAutoNameLog.log("auto-name.manual.no-active workspace=\(workspaceId, privacy: .public)")
             reportAutoNamingProblem("no_agent", agent: "claude", workspaceId: workspaceId, client: client)
             return
         }
@@ -156,6 +198,7 @@ extension CMUXCLI {
                 telemetry: telemetry,
                 manual: true
             )
+            manualAutoNameLog.log("auto-name.manual.single applied=\(title != nil, privacy: .public) workspace=\(workspaceId, privacy: .public)")
             if title == nil {
                 reportAutoNamingProblem("failed", agent: "claude", workspaceId: workspaceId, client: client)
             }
@@ -164,7 +207,7 @@ extension CMUXCLI {
 
         var tabTitles: [String] = []
         for entry in actives {
-            if let title = runClaudeAutoNameHook(
+            let title = runClaudeAutoNameHook(
                 parsedInput: parsedInput,
                 mappedSession: entry.record,
                 workspaceId: workspaceId,
@@ -174,11 +217,14 @@ extension CMUXCLI {
                 telemetry: telemetry,
                 manual: true,
                 panelOnly: true
-            ) {
+            )
+            manualAutoNameLog.log("auto-name.manual.tab surface=\(entry.surfaceId, privacy: .public) applied=\(title != nil, privacy: .public)")
+            if let title {
                 tabTitles.append(title)
             }
         }
         guard !tabTitles.isEmpty else {
+            manualAutoNameLog.log("auto-name.manual.all-tabs-failed workspace=\(workspaceId, privacy: .public)")
             reportAutoNamingProblem("failed", agent: "claude", workspaceId: workspaceId, client: client)
             return
         }

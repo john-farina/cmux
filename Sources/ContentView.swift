@@ -14658,6 +14658,8 @@ struct TabItemView: View, Equatable {
             preferredPath: SocketControlSettings.socketPath()
         )
         for workspaceId in workspaceIds {
+            // why: hook store lags restarts — the app passes its own panel→session pairs
+            var sessionPairs: [String] = []
             if let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) {
                 workspace.setAutoNamingWorkingStatus()
                 // Backstop: the CLI reports success or failure through
@@ -14666,15 +14668,32 @@ struct TabItemView: View, Equatable {
                     guard let workspace, workspace.hasAutoNamingWorkingStatus else { return }
                     workspace.setAutoNamingFailedStatus()
                 }
+                for panelId in workspace.panels.keys {
+                    var sessionId = SharedLiveAgentIndex.shared
+                        .snapshot(workspaceId: workspaceId, panelId: panelId)
+                        .flatMap { $0.kind == .claude ? $0.sessionId : nil }
+                    if sessionId == nil,
+                       let binding = workspace.surfaceResumeBindingsByPanelId[panelId],
+                       binding.kind == RestorableAgentKind.claude.rawValue {
+                        sessionId = binding.checkpointId
+                    }
+                    if let sessionId, !sessionId.isEmpty {
+                        sessionPairs.append("\(sessionId)@\(panelId.uuidString)")
+                    }
+                }
             }
             let process = Process()
             process.executableURL = cliURL
-            process.arguments = [
+            var arguments = [
                 "--socket", socketPath,
                 "hooks", "claude", "auto-name",
                 "--workspace", workspaceId.uuidString,
                 "--manual",
             ]
+            if !sessionPairs.isEmpty {
+                arguments.append(contentsOf: ["--sessions", sessionPairs.joined(separator: ",")])
+            }
+            process.arguments = arguments
             var environment = ProcessInfo.processInfo.environment
             environment["CMUX_SOCKET_PATH"] = socketPath
             environment["CMUX_BUNDLED_CLI_PATH"] = cliURL.path

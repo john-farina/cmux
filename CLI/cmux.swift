@@ -311,24 +311,34 @@ final class ClaudeHookSessionStore {
         }
     }
 
-    /// Every surface-active session in a workspace (one per terminal tab
-    /// running an agent) — manual auto-name fans out over these so each tab
-    /// gets its own name. Falls back to the workspace-active session when
-    /// no per-surface entries exist (legacy stores).
+    /// Every session in a workspace eligible for manual auto-naming, one per
+    /// terminal tab (surface). Surface-active entries win; surfaces without
+    /// one (a resumed session is only promoted to active on its first prompt)
+    /// fall back to the newest session record for that surface.
     func activeSessionRecords(workspaceId: String) throws -> [(surfaceId: String, record: ClaudeHookSessionRecord)] {
         try withLockedState { state in
-            var results: [(surfaceId: String, record: ClaudeHookSessionRecord)] = []
+            var bySurface: [String: ClaudeHookSessionRecord] = [:]
+            for record in state.sessions.values where record.workspaceId == workspaceId {
+                let surfaceId = record.surfaceId
+                guard !surfaceId.isEmpty else { continue }
+                if let existing = bySurface[surfaceId], existing.updatedAt >= record.updatedAt {
+                    continue
+                }
+                bySurface[surfaceId] = record
+            }
             for (surfaceId, active) in state.activeSessionsBySurface {
                 guard let record = state.sessions[active.sessionId],
                       record.workspaceId == workspaceId else { continue }
-                results.append((surfaceId: surfaceId, record: record))
+                bySurface[surfaceId] = record
             }
-            if results.isEmpty,
+            if bySurface.isEmpty,
                let active = state.activeSessionsByWorkspace[workspaceId],
                let record = state.sessions[active.sessionId] {
-                results.append((surfaceId: record.surfaceId, record: record))
+                bySurface[record.surfaceId] = record
             }
-            return results.sorted { $0.surfaceId < $1.surfaceId }
+            return bySurface
+                .map { (surfaceId: $0.key, record: $0.value) }
+                .sorted { $0.surfaceId < $1.surfaceId }
         }
     }
 
@@ -24539,7 +24549,30 @@ struct CMUXCLI {
                 )
                 if manual, mappedSession == nil, hookSurfaceFlag == nil {
                     // why: workspace-wide manual trigger names each tab, then the workspace
-                    let actives = (try? sessionStore.activeSessionRecords(workspaceId: workspaceId)) ?? []
+                    var actives: [(surfaceId: String, record: ClaudeHookSessionRecord)] = []
+                    if let sessionsFlag = optionValue(hookArgs, name: "--sessions") {
+                        // "sessionId@surfaceId,..." pairs from the app — the
+                        // authority on live panel→session mapping after restarts.
+                        let now = Date().timeIntervalSince1970
+                        actives = sessionsFlag.split(separator: ",").compactMap { pair in
+                            let parts = pair.split(separator: "@", maxSplits: 1)
+                            guard parts.count == 2 else { return nil }
+                            let sessionId = String(parts[0])
+                            let surfaceId = String(parts[1])
+                            let record = (try? sessionStore.lookup(sessionId: sessionId))
+                                ?? ClaudeHookSessionRecord(
+                                    sessionId: sessionId,
+                                    workspaceId: workspaceId,
+                                    surfaceId: surfaceId,
+                                    startedAt: now,
+                                    updatedAt: now
+                                )
+                            return (surfaceId: surfaceId, record: record)
+                        }
+                    }
+                    if actives.isEmpty {
+                        actives = (try? sessionStore.activeSessionRecords(workspaceId: workspaceId)) ?? []
+                    }
                     runManualWorkspaceAutoName(
                         actives: actives,
                         parsedInput: parsedInput,

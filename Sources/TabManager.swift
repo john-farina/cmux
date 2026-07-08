@@ -3261,6 +3261,10 @@ class TabManager: ObservableObject {
         notificationDismissal.dismissNotificationOnDirectInteraction(workspaceId: tabId, surfaceId: surfaceId)
     }
 
+    func beginUnreadNavigatorPeek(tabId: UUID) {
+        notificationDismissal.beginNavigatorPeek(workspaceId: tabId)
+    }
+
     @discardableResult
     func dismissNotificationOnTerminalInteraction(tabId: UUID, surfaceId: UUID?) -> Bool {
         notificationDismissal.dismissNotificationOnTerminalInteraction(workspaceId: tabId, surfaceId: surfaceId)

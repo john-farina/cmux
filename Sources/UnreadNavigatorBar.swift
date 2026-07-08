@@ -108,6 +108,9 @@ struct UnreadNavigatorBar: View {
             )
             .onHover { isHovering = $0 }
             .padding(.horizontal, ViewConstants.horizontalInset)
+            // why: top inset lands the pill at firstRowTopOffset — the y where
+            // the first tab row normally starts.
+            .padding(.top, ViewConstants.topInset)
             .padding(.bottom, ViewConstants.bottomInset)
             .transition(.opacity)
             .accessibilityIdentifier("sidebar.unreadNavigator")
@@ -142,19 +145,23 @@ struct UnreadNavigatorBar: View {
         CmuxLog.unreadNavigator.log(
             "navigate workspace=\(target.workspaceId, privacy: .public) surface=\(target.surfaceId?.uuidString ?? "nil", privacy: .public) delta=\(delta, privacy: .public) total=\(targets.count, privacy: .public)"
         )
-        // Focus only (notificationId: nil) — reading happens when the user
-        // interacts with the terminal, via the existing dismissal model.
-        _ = AppDelegate.shared?.notificationNavigation.open(
-            tabId: target.workspaceId,
+        // why: peek suppresses all dismissal for this workspace until a real
+        // terminal click/keystroke, so navigating never marks anything read.
+        tabManager.beginUnreadNavigatorPeek(tabId: target.workspaceId)
+        tabManager.focusTab(
+            target.workspaceId,
             surfaceId: target.surfaceId,
-            notificationId: nil
+            dismissRestoredUnreadOnResume: false
         )
     }
 }
 
 private enum ViewConstants {
-    static let horizontalInset: CGFloat = 10
-    static let bottomInset: CGFloat = 4
-    static let arrowHorizontalPadding: CGFloat = 8
-    static let buttonVerticalPadding: CGFloat = 4
+    static let horizontalInset: CGFloat =
+        SidebarWorkspaceListMetrics.rowOuterHorizontalPadding +
+        SidebarWorkspaceListMetrics.rowContentHorizontalPadding
+    static let topInset: CGFloat = SidebarWorkspaceListMetrics.rowVerticalPadding + 6
+    static let bottomInset: CGFloat = SidebarWorkspaceListMetrics.rowVerticalPadding
+    static let arrowHorizontalPadding: CGFloat = 12
+    static let buttonVerticalPadding: CGFloat = 7
 }

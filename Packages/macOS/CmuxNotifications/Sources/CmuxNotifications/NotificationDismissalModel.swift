@@ -20,6 +20,9 @@ public final class NotificationDismissalModel: NotificationDismissing {
 
     private var suppressFocusFlash = false
     private var pendingSelectedWorkspaceContext: NotificationDismissalContext?
+    // why: the unread navigator reveals a workspace without "reading" it; only
+    // a real terminal interaction (click/keystroke) may dismiss the peeked one.
+    private var navigatorPeekWorkspaceId: UUID?
 
     /// Creates a detached model; call ``attach(host:)`` before use.
     public init() {}
@@ -38,6 +41,13 @@ public final class NotificationDismissalModel: NotificationDismissing {
 
     public func setPendingSelectionContext(_ context: NotificationDismissalContext?) {
         pendingSelectedWorkspaceContext = context
+    }
+
+    /// Marks `workspaceId` as navigator-peeked: dismissals for it are
+    /// suppressed until a `.terminalInteraction` arrives (or the user moves on
+    /// to dismissing some other workspace, which ends the peek).
+    public func beginNavigatorPeek(workspaceId: UUID) {
+        navigatorPeekWorkspaceId = workspaceId
     }
 
     public func takePendingSelectionContext() -> NotificationDismissalContext? {
@@ -101,6 +111,12 @@ public final class NotificationDismissalModel: NotificationDismissing {
         surfaceId: UUID?,
         context: NotificationDismissalContext
     ) -> Bool {
+        if let peekedWorkspaceId = navigatorPeekWorkspaceId {
+            if peekedWorkspaceId == workspaceId, context != .terminalInteraction {
+                return false
+            }
+            navigatorPeekWorkspaceId = nil
+        }
         guard let host else { return false }
         guard host.selectedWorkspaceId == workspaceId else { return false }
         if context.requiresActiveApp {

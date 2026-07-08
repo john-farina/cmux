@@ -40,4 +40,8 @@ public protocol NotificationDismissing: AnyObject {
     /// Dismisses for typing into the terminal.
     @discardableResult
     func dismissNotificationOnTerminalInteraction(workspaceId: UUID, surfaceId: UUID?) -> Bool
+
+    /// Marks a workspace as unread-navigator-peeked: its dismissals are
+    /// suppressed until a `.terminalInteraction`, so peeking never marks read.
+    func beginNavigatorPeek(workspaceId: UUID)
 }

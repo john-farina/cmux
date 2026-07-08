@@ -1299,8 +1299,12 @@ extension Workspace {
                         restorableAgent?.resumeStartupInput(allowLauncherScript: false, allowOversizedInlineInput: true)
                             .map(SurfaceResumeStartupLaunch.input)
                     } else {
-                        restorableAgent?.resumeStartupCommand()
-                            .map(SurfaceResumeStartupLaunch.command)
+                        // why: the `.command` zsh -lic launcher sandwich re-sources rc files 2-3x
+                        // and breaks tty parity vs hand-typed `claude`; keep it only as oversized fallback.
+                        restorableAgent?.resumeStartupInput()
+                            .map(SurfaceResumeStartupLaunch.input)
+                            ?? restorableAgent?.resumeStartupCommand()
+                                .map(SurfaceResumeStartupLaunch.command)
                     }
                 } else {
                     nil

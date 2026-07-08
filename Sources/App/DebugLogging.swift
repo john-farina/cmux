@@ -16,4 +16,5 @@ enum CmuxLog {
     static let agentResume = Logger(subsystem: "com.cmuxterm.app", category: "agent-resume")
     static let agentTemplates = Logger(subsystem: "com.cmuxterm.app", category: "agent-templates")
     static let externalImport = Logger(subsystem: "com.cmuxterm.app", category: "external-import")
+    static let unreadNavigator = Logger(subsystem: "com.cmuxterm.app", category: "unread-navigator")
 }

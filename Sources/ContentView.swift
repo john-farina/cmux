@@ -10580,8 +10580,11 @@ struct VerticalTabsSidebar: View {
                     .frame(width: 0, height: 0)
                 )
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    Color.clear.frame(height: scrollInsets.top)
-                        .allowsHitTesting(false)
+                    VStack(spacing: 0) {
+                        Color.clear.frame(height: scrollInsets.top)
+                            .allowsHitTesting(false)
+                        UnreadNavigatorBar()
+                    }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     Color.clear.frame(height: scrollInsets.bottom)

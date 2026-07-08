@@ -93,6 +93,9 @@ struct WorkspaceListView: View {
     @State private var macTitlePickerSwitchGeneration: UInt64 = 0
     @State private var macTitlePickerPendingSelection: WorkspaceMacSelection?
     @State private var deferredWorkspaceSelectionGeneration: UInt64 = 0
+    /// The row whose tap is attaching, so it can show a spinner instead of
+    /// sitting dead until the workspace opens.
+    @State private var activatingWorkspaceID: MobileWorkspacePreview.ID?
     /// Stable machine-menu content. Kept as value state so live workspace or
     /// device-tree updates that do not change the actual machine set/name
     /// snapshot do not rebuild an open native Menu. `nil` only before the first
@@ -280,6 +283,10 @@ struct WorkspaceListView: View {
         .onAppear {
             updateMachineSnapshots(currentMachineSnapshots)
             filter.pruneMachinesForFilterMenu(visibleMacSelection: currentVisibleMacSelection)
+            activatingWorkspaceID = nil
+        }
+        .onChange(of: selectedWorkspaceID) { _, _ in
+            activatingWorkspaceID = nil
         }
         .onChange(of: currentMachineSnapshots) { _, snapshots in
             updateMachineSnapshots(snapshots)
@@ -506,6 +513,7 @@ struct WorkspaceListView: View {
             unreadIndicatorLeftShift: unreadIndicatorLeftShift,
             profilePictureLeftShift: profilePictureLeftShift,
             profilePictureSize: profilePictureSize,
+            isActivating: activatingWorkspaceID == workspace.id,
             selectWorkspace: { id in _ = selectWorkspaceFromList(id) },
             renameWorkspace: capabilities.supportsWorkspaceActions ? renameWorkspace : nil,
             setPinned: capabilities.supportsWorkspaceActions ? setPinned : nil,
@@ -543,6 +551,7 @@ struct WorkspaceListView: View {
 
     @discardableResult
     func selectWorkspaceFromList(_ id: MobileWorkspacePreview.ID) -> Task<Void, Never>? {
+        activatingWorkspaceID = id
         invalidateDeferredWorkspaceSelection()
         let selectionGeneration = deferredWorkspaceSelectionGeneration
         guard let cancelTask = prepareWorkspaceSelectionFromList() else {

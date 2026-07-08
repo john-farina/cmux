@@ -14,6 +14,8 @@ struct WorkspaceNavigationRow: View {
     var unreadIndicatorLeftShift: Double = MobileDisplaySettings.defaultUnreadIndicatorLeftShift
     var profilePictureLeftShift: Double = MobileDisplaySettings.defaultProfilePictureLeftShift
     var profilePictureSize: Double = MobileDisplaySettings.defaultProfilePictureSize
+    /// Forwarded to ``WorkspaceRow``: spinner while this row's tap is attaching.
+    var isActivating: Bool = false
     let selectWorkspace: (MobileWorkspacePreview.ID) -> Void
     /// Rename the workspace on the Mac. When `nil` (e.g. previews) the rename
     /// affordance is hidden.
@@ -120,7 +122,8 @@ struct WorkspaceNavigationRow: View {
             previewLineLimit: previewLineLimit,
             unreadIndicatorLeftShift: unreadIndicatorLeftShift,
             profilePictureLeftShift: profilePictureLeftShift,
-            profilePictureSize: profilePictureSize
+            profilePictureSize: profilePictureSize,
+            isActivating: isActivating
         )
     }
 

@@ -19,6 +19,9 @@ struct WorkspaceRow: View {
     var unreadIndicatorLeftShift: Double = MobileDisplaySettings.defaultUnreadIndicatorLeftShift
     var profilePictureLeftShift: Double = MobileDisplaySettings.defaultProfilePictureLeftShift
     var profilePictureSize: Double = MobileDisplaySettings.defaultProfilePictureSize
+    /// Shows a spinner in the trailing slot while the tapped workspace is
+    /// attaching, so the row isn't dead to the touch during the async open.
+    var isActivating: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -52,10 +55,15 @@ struct WorkspaceRow: View {
 
                     Spacer(minLength: 8)
 
-                    Text(workspace.timestampOrStatus(connectionStatus: connectionStatus))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if isActivating {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Text(workspace.timestampOrStatus(connectionStatus: connectionStatus))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Text(workspace.previewLine)

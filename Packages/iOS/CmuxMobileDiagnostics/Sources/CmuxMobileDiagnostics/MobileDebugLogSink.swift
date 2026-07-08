@@ -42,6 +42,9 @@ public actor MobileDebugLogSink {
         for continuation in continuations.values {
             continuation.yield(line)
         }
+        #if DEBUG
+        Self.appendToDebugFile(line)
+        #endif
     }
 
     /// The full buffer as newline-joined text, newest last.
@@ -80,4 +83,45 @@ public actor MobileDebugLogSink {
     private func removeContinuation(_ id: UUID) {
         continuations[id] = nil
     }
+
+    #if DEBUG
+    /// Documents/ so the file is pullable off-device via
+    /// `devicectl device copy from --domain-type appDataContainer`.
+    public static let debugFilePath: String =
+        (NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first
+            ?? NSTemporaryDirectory()) + "/cmux-debug.log"
+
+    // why: cap growth across launches — debug builds only, 10MB then start over.
+    private static let truncateOverBytes = 10_000_000
+    private nonisolated static let didResetOversizedFile: Bool = {
+        let path = debugFilePath
+        if let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int,
+           size > truncateOverBytes {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        return true
+    }()
+
+    private static func appendToDebugFile(_ line: String) {
+        _ = didResetOversizedFile
+        let fd = open(debugFilePath, O_WRONLY | O_APPEND | O_CREAT, 0o600)
+        guard fd >= 0 else { return }
+        defer { close(fd) }
+        let bytes = Array((line + "\n").utf8)
+        bytes.withUnsafeBufferPointer { buffer in
+            guard var baseAddress = buffer.baseAddress else { return }
+            var remaining = buffer.count
+            while remaining > 0 {
+                let written = write(fd, baseAddress, remaining)
+                if written > 0 {
+                    baseAddress += written
+                    remaining -= written
+                    continue
+                }
+                if written < 0 && errno == EINTR { continue }
+                break
+            }
+        }
+    }
+    #endif
 }

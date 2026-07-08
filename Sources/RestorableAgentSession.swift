@@ -1182,17 +1182,25 @@ struct RestorableAgentSessionIndex: Sendable {
             }
         }
 
-        for (key, detected) in detectedSnapshots {
+        var assignedInferredSessions = Set<SessionKey>()
+        for (key, detected) in detectedSnapshots.sorted(by: {
+            $0.key.panelId.uuidString < $1.key.panelId.uuidString
+        }) {
             let sameKindPanelCandidate = hookCandidatesByPanelAndKind[
                 PanelKindKey(panelKey: key, kind: detected.snapshot.kind)
             ]
+            // why: a same-session hook record on ANOTHER panel only confirms an argv-proven
+            // (explicit) detection; for inferred ids it is the cross-panel clobber vector.
+            let sessionCandidate = detected.sessionIDSource == .explicit
+                ? hookCandidatesBySession[
+                    SessionKey(kind: detected.snapshot.kind, sessionId: detected.snapshot.sessionId)
+                ]
+                : nil
             if let existing = Self.matchingHookEntry(
                 for: detected.snapshot,
                 resolved: resolved[key],
                 panelCandidate: sameKindPanelCandidate,
-                sessionCandidate: hookCandidatesBySession[
-                    SessionKey(kind: detected.snapshot.kind, sessionId: detected.snapshot.sessionId)
-                ]
+                sessionCandidate: sessionCandidate
             ) {
                 resolved[key] = Entry(
                     snapshot: detected.snapshot,
@@ -1205,21 +1213,40 @@ struct RestorableAgentSessionIndex: Sendable {
                         processIdentityProvider: processIdentityProvider
                     )
                 )
-            } else if detected.sessionIDSource == .inferredLatestSessionFile,
-                      let panelCandidate = sameKindPanelCandidate {
-                // Latest-file detection is ambiguous when multiple panels share a cwd; preserve the exact
-                // hook-store identity while still carrying live process evidence for this panel.
-                resolved[key] = Entry(
-                    snapshot: panelCandidate.snapshot,
-                    lifecycle: panelCandidate.lifecycle,
-                    updatedAt: panelCandidate.updatedAt,
-                    processIDs: detected.processIDs,
-                    agentProcessIDs: detected.agentProcessIDs,
-                    agentProcessIdentities: agentProcessIdentities(
-                        for: detected.agentProcessIDs,
-                        processIdentityProvider: processIdentityProvider
+            } else if detected.sessionIDSource == .inferredLatestSessionFile {
+                // why: shared-cwd panes all infer the SAME newest transcript — an inferred id must
+                // never replace a recorded identity, and may be assigned to at most one panel.
+                let sessionKey = SessionKey(kind: detected.snapshot.kind, sessionId: detected.snapshot.sessionId)
+                if let identity = sameKindPanelCandidate ?? resolved[key] {
+                    resolved[key] = Entry(
+                        snapshot: identity.snapshot,
+                        lifecycle: identity.lifecycle,
+                        updatedAt: identity.updatedAt,
+                        processIDs: detected.processIDs,
+                        agentProcessIDs: detected.agentProcessIDs,
+                        agentProcessIdentities: agentProcessIdentities(
+                            for: detected.agentProcessIDs,
+                            processIdentityProvider: processIdentityProvider
+                        )
                     )
-                )
+                } else if hookCandidatesBySession[sessionKey] == nil,
+                          assignedInferredSessions.insert(sessionKey).inserted {
+                    resolved[key] = Entry(
+                        snapshot: detected.snapshot,
+                        lifecycle: nil,
+                        updatedAt: 0,
+                        processIDs: detected.processIDs,
+                        agentProcessIDs: detected.agentProcessIDs,
+                        agentProcessIdentities: agentProcessIdentities(
+                            for: detected.agentProcessIDs,
+                            processIdentityProvider: processIdentityProvider
+                        )
+                    )
+                } else {
+                    CmuxLog.agentResume.log(
+                        "index.inferred-skip panel=\(key.panelId.uuidString, privacy: .public) session=\(sessionKey.sessionId, privacy: .public) reason=claimed-elsewhere"
+                    )
+                }
             } else {
                 resolved[key] = Entry(
                     snapshot: detected.snapshot,

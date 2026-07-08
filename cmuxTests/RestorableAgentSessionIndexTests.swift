@@ -377,6 +377,102 @@ final class RestorableAgentSessionIndexTests: XCTestCase {
         )
     }
 
+    // why: shared-cwd panes all infer the same newest transcript; unchecked, that duplicated one
+    // session across panels and dropped their real sessions from the quit snapshot (2026-07-08).
+    func testInferredLatestSessionNeverClobbersRecordedIdentityOrDuplicates() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory
+            .appendingPathComponent("cmux-claude-inferred-dedupe-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let configDir = root.appendingPathComponent("claude-config", isDirectory: true)
+        let projectsDir = configDir.appendingPathComponent("projects", isDirectory: true)
+        let cwd = root.appendingPathComponent("repo", isDirectory: true)
+        try fm.createDirectory(at: cwd, withIntermediateDirectories: true)
+        try fm.createDirectory(
+            at: projectsDir.appendingPathComponent(
+                RestorableAgentSessionIndex.encodeClaudeProjectDir(cwd.path),
+                isDirectory: true
+            ),
+            withIntermediateDirectories: true
+        )
+
+        let workspaceId = UUID()
+        let panelA = UUID()
+        let panelB = UUID()
+        let emptyPanelC = UUID()
+        let sessionA = "11111111-1111-1111-1111-111111111111"
+        let sessionB = "22222222-2222-2222-2222-222222222222"
+        try writeClaudeTranscript(sessionId: sessionA, cwd: cwd, projectsDir: projectsDir)
+        try writeClaudeTranscript(sessionId: sessionB, cwd: cwd, projectsDir: projectsDir)
+
+        try writeClaudeHookStore(
+            root: root,
+            sessions: [
+                sessionA: hookRecord(
+                    sessionId: sessionA,
+                    workspaceId: workspaceId,
+                    panelId: panelA,
+                    cwd: cwd.path,
+                    configDir: configDir.path,
+                    updatedAt: 10
+                ),
+                sessionB: hookRecord(
+                    sessionId: sessionB,
+                    workspaceId: workspaceId,
+                    panelId: panelB,
+                    cwd: cwd.path,
+                    configDir: configDir.path,
+                    updatedAt: 20
+                ),
+            ]
+        )
+
+        // Every pane's failed explicit resolution infers the same "newest" transcript: sessionB.
+        let inferredNewest = SessionRestorableAgentSnapshot(
+            kind: .claude,
+            sessionId: sessionB,
+            workingDirectory: cwd.path,
+            launchCommand: nil,
+            registration: nil
+        )
+        func detected(_ pid: Int) -> RestorableAgentSessionIndex.ProcessDetectedSnapshotEntry {
+            (
+                snapshot: inferredNewest,
+                updatedAt: 0,
+                processIDs: [pid],
+                agentProcessIDs: [pid],
+                sessionIDSource: .inferredLatestSessionFile
+            )
+        }
+        let index = RestorableAgentSessionIndex.load(
+            homeDirectory: root.path,
+            fileManager: fm,
+            registry: CmuxVaultAgentRegistry.load(homeDirectory: root.path, fileManager: fm),
+            detectedSnapshots: [
+                RestorableAgentSessionIndex.PanelKey(workspaceId: workspaceId, panelId: panelA): detected(101),
+                RestorableAgentSessionIndex.PanelKey(workspaceId: workspaceId, panelId: panelB): detected(102),
+                RestorableAgentSessionIndex.PanelKey(workspaceId: workspaceId, panelId: emptyPanelC): detected(103),
+            ],
+            processArgumentsProvider: { _ in nil },
+            processIdentityProvider: { _ in nil }
+        )
+
+        XCTAssertEqual(
+            index.snapshot(workspaceId: workspaceId, panelId: panelA)?.sessionId,
+            sessionA,
+            "An inferred latest-file session must not replace the panel's hook-recorded identity."
+        )
+        XCTAssertEqual(
+            index.snapshot(workspaceId: workspaceId, panelId: panelB)?.sessionId,
+            sessionB
+        )
+        XCTAssertNil(
+            index.snapshot(workspaceId: workspaceId, panelId: emptyPanelC),
+            "An inferred session already recorded for another panel must not be duplicated onto an empty panel."
+        )
+    }
+
     // A Claude session can start in one directory and `cd` into another (e.g. a repo root then a
     // worktree); the hook-reported `cwd` drifts to the latter, but Claude keeps the transcript in
     // the start directory's project folder. Fork/resume must cd into the directory that actually

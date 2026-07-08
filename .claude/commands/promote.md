@@ -15,12 +15,7 @@ Move the current fork changes into John's REAL cmux (`/Applications/cmux.app`) w
 
 ## Rollback
 
-```bash
-osascript -e 'quit app "cmux"'; sleep 2
-rm -rf /Applications/cmux.app
-ditto "$(ls -dt ~/.cmux-backups/apps/*/ | head -1)cmux.app" /Applications/cmux.app
-open /Applications/cmux.app
-```
+`/revert-app` (runs `./scripts/revert-local.sh`) — restores the newest archive from `~/.cmux-backups/apps/`, stashing the current app first so the revert is itself revertible. `--list` to pick a specific archive.
 
 ## Invariants
 

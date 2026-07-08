@@ -28,6 +28,37 @@ extension cmuxApp {
             )) {
                 postForkMenuAction(.forkAutoNameWorkspaceRequested)
             }
+            Divider()
+            // why: the titlebar iPhone button is PostHog-flag-gated and can
+            // vanish on fork builds; this entry is unconditional.
+            Button(String(
+                localized: "command.mobileConnect.title",
+                defaultValue: "Connect iPhone/iPad"
+            )) {
+                MobilePairingWindowController.shared.show()
+            }
+            Button(String(
+                localized: "command.auth.signIn.title",
+                defaultValue: "Sign In"
+            )) {
+                guard let auth = AppDelegate.shared?.auth else {
+                    NSSound.beep()
+                    return
+                }
+                auth.browserSignIn.beginSignIn()
+            }
+            Button(String(
+                localized: "command.auth.signOut.title",
+                defaultValue: "Sign Out"
+            )) {
+                guard let auth = AppDelegate.shared?.auth else {
+                    NSSound.beep()
+                    return
+                }
+                Task { @MainActor in
+                    await auth.browserSignIn.signOut()
+                }
+            }
             let templates = AppDelegate.shared?.agentTemplateMenuEntriesForCommands(
                 preferredWindow: NSApp.keyWindow ?? NSApp.mainWindow
             ) ?? []

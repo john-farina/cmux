@@ -17,7 +17,7 @@ public struct AuthDebugLog: Sendable {
     public func log(_ message: String) {
         let redactedMessage = Self.redacted(message)
         Self.logger.log(level: authDebugLogType(for: redactedMessage), "\(redactedMessage, privacy: .public)")
-        #if DEBUG && os(macOS)
+        #if DEBUG
         let line = "[\(Date().formatted(Self.timestampFormat))] auth: \(redactedMessage)\n"
         for path in Self.debugLogPaths(environment: ProcessInfo.processInfo.environment) {
             appendAuthDebugLineToFile(line, path: path)
@@ -27,8 +27,16 @@ public struct AuthDebugLog: Sendable {
 
     private static let logger = Logger(subsystem: "com.cmuxterm.app", category: "auth")
 
-    #if DEBUG && os(macOS)
+    #if DEBUG
+    #if os(macOS)
     private static let debugLogPath = "/tmp/cmux-auth-debug.log"
+    #else
+    // iOS dev builds: Documents/ so the file is pullable off-device via
+    // `devicectl device copy from --domain-type appDataContainer`.
+    private static let debugLogPath =
+        (NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first
+            ?? NSTemporaryDirectory()) + "/cmux-auth-debug.log"
+    #endif
 
     // A Sendable value-type format (unlike ISO8601DateFormatter), so the
     // multi-actor logging path needs no unsafe shared formatter.
@@ -85,7 +93,7 @@ private func authDebugLogType(for message: String) -> OSLogType {
     return .debug
 }
 
-#if DEBUG && os(macOS)
+#if DEBUG
 private func appendAuthDebugLineToFile(_ line: String, path: String) {
     let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
     guard fd >= 0 else { return }

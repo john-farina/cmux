@@ -61,4 +61,4 @@ if [[ "$WAS_RUNNING" == "1" || "${1:-}" == "--launch" ]]; then
   echo "==> relaunched; workspaces + agent sessions restore automatically"
 fi
 
-echo "Rollback: newest archive in $BACKUP_ROOT (quit cmux, ditto it back, reopen)"
+echo "Rollback: scripts/revert-local.sh (or /revert-app) restores the newest archive from $BACKUP_ROOT"

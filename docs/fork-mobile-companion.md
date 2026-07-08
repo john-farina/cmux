@@ -200,3 +200,24 @@ xcrun devicectl device copy from \
 - **new RPC between phone and mac**: mac handler in the `MobileHostService.swift` dispatch (:1344/:1389 region; add the method to `requiresAuthorization` intentionally — stack auth is the sole gate), advertise a capability string in `MobileHostService+Capabilities.swift` so old apps degrade, phone request/response types in `Packages/iOS/CmuxMobileRPC`, wire types shared by both sides in `Packages/Shared/CMUXMobileCore` (`MobileSyncProtocol.swift`). iOS must feature-detect on the capability, never on version.
 - **localization**: every user-facing string on both sides uses `String(localized:defaultValue:)`; mac keys in `Resources/Localizable.xcstrings`, phone keys in the owning package's xcstrings (`CmuxMobileSupport/L10n.swift` helper). audit en + ja before handoff (CLAUDE.md localization rule).
 - **logging**: mac probes via `CmuxLog` (`Sources/App/DebugLogging.swift`) — kebab-case category, `key=value` lines, decisions + skip reasons, never scrollback/env/full commands. phone: `MobileDebugLog`/`DiagnosticEvent` for shell paths, `AuthDebugLog` for anything auth-adjacent (it redacts). permanent probes use these; `cmuxDebugLog` DEBUG-only probes get removed before commit.
+
+## 8. current state & open items (2026-07-08)
+
+context for any agent picking this up. goal: John controls his mac's cmux from the iphone from anywhere (mac stays awake via caffeinate; remote path is tailscale).
+
+### done
+- phone: dev build `dev.cmux.ios.john` installed on John's iPhone (udid `00008130-001828D1023A001C`) with `--prod-auth`, google sign-in verified working. builds MUST use `scripts/ios-phone-build.sh` (Xcode 26.6 via `DEVELOPER_DIR` — Xcode21 26.0.1's swift is too old for upstream mobile packages; team `9QFLC277YH`; device pinned — an unpinned reload once installed to the "Galaxy Fold S67" fleet device, still not uninstalled).
+- phone file logging: `Documents/cmux-debug.log` (all `MobileDebugLog` lines, sink tee) + `Documents/cmux-auth-debug.log` (AuthDebugLog, iOS DEBUG now included). pull over wifi: `scripts/ios-pull-logs.sh`.
+- mac: Toolbelt menu gained Connect iPhone/iPad, Sign In, Sign Out (`Sources/cmuxApp+ForkMenu.swift`) because the titlebar iPhone button is posthog-flag-gated and hidden on fork builds (a `defaults write com.cmuxterm.app cmux.flags.override.mobile-connect-button-enabled-release -bool true` override exists but the menu is the durable fix). verified in tag `john` DEV build.
+- template "Build iPhone App to Phone" in `~/.config/cmux/cmux.json` → Toolbelt runs the phone build in a new tab.
+
+### pending (in order)
+1. John runs `/promote` so the real `/Applications/cmux.app` gets the Toolbelt items, then: Toolbelt → Sign In (google, same account as phone) → Connect iPhone/iPad → scan QR with the IN-APP scanner.
+2. tailscale app on the iphone must be ON for remote use (direct tailscale dial only, no relay — see §4). it had been off for 14 days.
+3. optional cleanup: uninstall `dev.cmux.ios.john` from the Galaxy Fold S67 (`00008150-000E44123AF8401C`).
+
+### gotchas already hit (do not rediscover)
+- google oauth failing with `CancellationError()` exactly 30s after start = the sign-in preflight/token-work reset (§2), typically a wedged first-install state or a double tap — a clean reinstall fixed it; logs first (`scripts/ios-pull-logs.sh`), not theories.
+- `sudo log collect --device-udid` needs USB and fails with "Device not configured" over wifi; `idevicesyslog` often can't attach either. the Documents log files are the reliable path.
+- cmux.com's web sign-in handler only redirects tokens to `cmux`/`cmux-nightly` schemes (mac). the phone's oauth never touches that allowlist (stack sdk uses its own in-process `stack-auth-mobile-oauth-url` scheme).
+- upstream sync flow: `/sync-upstream` → `/promote` (mac) + Toolbelt build button (phone). fork's only mobile-code deltas are the two logging tees + Toolbelt section, so conflicts should be rare.

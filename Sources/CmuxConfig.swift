@@ -17,11 +17,12 @@ struct CmuxConfigFile: Codable, Sendable {
     var surfaceTabBarButtons: [CmuxSurfaceTabBarButton]?
     var commands: [CmuxCommandDefinition]
     var templates: [CmuxAgentTemplate]
+    var projects: [CmuxProject]
     var vault: CmuxVaultConfigDefinition?
     var workspaceGroups: CmuxConfigWorkspaceGroupsDefinition?
 
     private enum CodingKeys: String, CodingKey {
-        case actions, ui, notifications, newWorkspaceCommand, surfaceTabBarButtons, commands, templates, vault, workspaceGroups
+        case actions, ui, notifications, newWorkspaceCommand, surfaceTabBarButtons, commands, templates, projects, vault, workspaceGroups
     }
 
     init(
@@ -32,6 +33,7 @@ struct CmuxConfigFile: Codable, Sendable {
         surfaceTabBarButtons: [CmuxSurfaceTabBarButton]? = nil,
         commands: [CmuxCommandDefinition] = [],
         templates: [CmuxAgentTemplate] = [],
+        projects: [CmuxProject] = [],
         vault: CmuxVaultConfigDefinition? = nil,
         workspaceGroups: CmuxConfigWorkspaceGroupsDefinition? = nil
     ) {
@@ -42,6 +44,7 @@ struct CmuxConfigFile: Codable, Sendable {
         self.surfaceTabBarButtons = surfaceTabBarButtons
         self.commands = commands
         self.templates = templates
+        self.projects = projects
         self.vault = vault
         self.workspaceGroups = workspaceGroups
     }
@@ -91,6 +94,7 @@ struct CmuxConfigFile: Codable, Sendable {
         }
         commands = try container.decodeIfPresent([CmuxCommandDefinition].self, forKey: .commands) ?? []
         templates = try container.decodeIfPresent([CmuxAgentTemplate].self, forKey: .templates) ?? []
+        projects = try container.decodeIfPresent([CmuxProject].self, forKey: .projects) ?? []
         vault = try container.decodeIfPresent(CmuxVaultConfigDefinition.self, forKey: .vault)
         workspaceGroups = try container.decodeIfPresent(
             CmuxConfigWorkspaceGroupsDefinition.self,
@@ -1515,6 +1519,80 @@ struct CmuxAgentTemplate: Codable, Sendable, Hashable {
     }
 }
 
+/// Saved project from the top-level `projects` config key: a named repo path
+/// launchable from the palette, Toolbelt menu, or workspace context menu.
+/// `template` optionally names a `templates` entry whose command runs in the
+/// opened terminal.
+struct CmuxProject: Codable, Sendable, Hashable {
+    var name: String
+    var path: String
+    var template: String?
+
+    init(name: String, path: String, template: String? = nil) {
+        self.name = name
+        self.path = path
+        self.template = template
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        path = try container.decode(String.self, forKey: .path)
+        template = try container.decodeIfPresent(String.self, forKey: .template)
+
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Project name must not be blank"
+                )
+            )
+        }
+        if path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Project '\(name)' must not define a blank 'path'"
+                )
+            )
+        }
+    }
+
+    var expandedPath: String {
+        (path as NSString).expandingTildeInPath
+    }
+
+    func resolvedTemplateCommand(in templates: [CmuxAgentTemplate]) -> String? {
+        template.flatMap { templateName in
+            templates.first(where: { $0.name == templateName })?.command
+        }
+    }
+
+    func syntheticCommand(resolvingTemplates templates: [CmuxAgentTemplate]) -> CmuxCommandDefinition {
+        let templateCommand = resolvedTemplateCommand(in: templates)
+        return CmuxCommandDefinition(
+            name: "Project: \(name)",
+            keywords: [path],
+            workspace: CmuxWorkspaceDefinition(
+                name: name,
+                cwd: expandedPath,
+                layout: .pane(CmuxPaneDefinition(surfaces: [
+                    CmuxSurfaceDefinition(type: .terminal, command: templateCommand)
+                ]))
+            )
+        )
+    }
+}
+
+/// A loaded project resolved for menu display: `id` is the synthetic palette
+/// action id, `command` the resolved template command (if any).
+struct CmuxProjectMenuEntry: Sendable, Hashable {
+    let id: String
+    var name: String
+    let path: String
+    let command: String?
+}
+
 struct CmuxCommandDefinition: Codable, Sendable, Identifiable {
     var name: String
     var description: String?
@@ -1809,6 +1887,10 @@ final class CmuxConfigStore: ObservableObject {
     private(set) var commandSourcePaths: [String: String] = [:]
     /// Action ids synthesized from the `templates` config key (palette-only launch presets).
     private(set) var templateActionIDs: Set<String> = []
+    /// Action ids synthesized from the `projects` config key (saved repo launchers).
+    private(set) var projectActionIDs: Set<String> = []
+    /// Loaded projects in config order (local first), resolved for menu use.
+    private var loadedProjectMenuEntries: [CmuxProjectMenuEntry] = []
     private(set) var actionLookup: [String: CmuxResolvedConfigAction] = [:]
     private(set) var surfaceTabBarButtonSourcePath: String?
     private(set) var surfaceTabBarCommandSourcePaths: [String: String] = [:]
@@ -2055,6 +2137,8 @@ final class CmuxConfigStore: ObservableObject {
         var seenNames = Set<String>()
         var sourcePaths: [String: String] = [:]
         var templateCommandIDs = Set<String>()
+        var projectCommandIDs = Set<String>()
+        var projectEntries: [CmuxProjectMenuEntry] = []
         var configuredNewWorkspaceCommandName: String?
         var configuredNewWorkspaceCommandSourcePath: String?
         var configuredNewWorkspaceActionID: String?
@@ -2087,6 +2171,8 @@ final class CmuxConfigStore: ObservableObject {
         }
         let localActions = localConfig.map { actionEntries(from: $0.actions, sourcePath: localPath) } ?? [:]
         let globalActions = globalConfig.map { actionEntries(from: $0.actions, sourcePath: globalConfigPath) } ?? [:]
+        // Projects may reference a template from either config file.
+        let allTemplates = (localConfig?.templates ?? []) + (globalConfig?.templates ?? [])
 
         // Local config takes precedence
         if let localConfig {
@@ -2125,6 +2211,23 @@ final class CmuxConfigStore: ObservableObject {
                     commands.append(command)
                     seenNames.insert(command.name)
                     templateCommandIDs.insert(command.id)
+                    if let localPath {
+                        sourcePaths[command.id] = localPath
+                    }
+                }
+            }
+            for project in localConfig.projects {
+                let command = project.syntheticCommand(resolvingTemplates: allTemplates)
+                if !seenNames.contains(command.name) {
+                    commands.append(command)
+                    seenNames.insert(command.name)
+                    projectCommandIDs.insert(command.id)
+                    projectEntries.append(CmuxProjectMenuEntry(
+                        id: command.id,
+                        name: project.name,
+                        path: project.expandedPath,
+                        command: project.resolvedTemplateCommand(in: allTemplates)
+                    ))
                     if let localPath {
                         sourcePaths[command.id] = localPath
                     }
@@ -2173,6 +2276,21 @@ final class CmuxConfigStore: ObservableObject {
                     commands.append(command)
                     seenNames.insert(command.name)
                     templateCommandIDs.insert(command.id)
+                    sourcePaths[command.id] = globalConfigPath
+                }
+            }
+            for project in globalConfig.projects {
+                let command = project.syntheticCommand(resolvingTemplates: allTemplates)
+                if !seenNames.contains(command.name) {
+                    commands.append(command)
+                    seenNames.insert(command.name)
+                    projectCommandIDs.insert(command.id)
+                    projectEntries.append(CmuxProjectMenuEntry(
+                        id: command.id,
+                        name: project.name,
+                        path: project.expandedPath,
+                        command: project.resolvedTemplateCommand(in: allTemplates)
+                    ))
                     sourcePaths[command.id] = globalConfigPath
                 }
             }
@@ -2241,6 +2359,11 @@ final class CmuxConfigStore: ObservableObject {
         loadedActions = resolvedActions
         commandSourcePaths = sourcePaths
         templateActionIDs = templateCommandIDs
+        projectActionIDs = projectCommandIDs
+        loadedProjectMenuEntries = projectEntries
+        if !projectCommandIDs.isEmpty {
+            CmuxLog.agentTemplates.log("projects.loaded count=\(projectCommandIDs.count, privacy: .public)")
+        }
         if !templateCommandIDs.isEmpty {
             CmuxLog.agentTemplates.log("templates.loaded count=\(templateCommandIDs.count, privacy: .public)")
         }
@@ -2369,6 +2492,16 @@ final class CmuxConfigStore: ObservableObject {
         fallback: [String: ActionEntry]
     ) -> [String: ActionEntry] {
         fallback.merging(primary) { _, primary in primary }
+    }
+
+    /// Saved projects for the fork's Toolbelt menu: `actionId` runs the
+    /// new-workspace launch; `path`/`command` back the open-tab-here item.
+    func projectMenuEntries() -> [CmuxProjectMenuEntry] {
+        loadedProjectMenuEntries.map { entry in
+            var sanitized = entry
+            sanitized.name = sanitizeConfigText(entry.name, fallback: entry.name)
+            return sanitized
+        }
     }
 
     /// Agent launch templates as (action id, ready-localized display title)

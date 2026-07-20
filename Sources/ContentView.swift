@@ -2867,6 +2867,32 @@ struct ContentView: View {
             _ = executeConfiguredAction(id: actionId)
         })
 
+        view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: .forkOpenProjectTabRequested)) { notification in
+            guard Self.shouldHandleCommandPaletteRequest(
+                observedWindow: observedWindow,
+                requestedWindow: notification.object as? NSWindow,
+                keyWindow: NSApp.keyWindow,
+                mainWindow: NSApp.mainWindow
+            ) else { return }
+            guard let path = notification.userInfo?["path"] as? String,
+                  let workspace = tabManager.selectedWorkspace else {
+                NSSound.beep()
+                return
+            }
+            let pane = workspace.focusedPanelId.flatMap { workspace.paneId(forPanelId: $0) }
+                ?? workspace.bonsplitController.allPaneIds.first
+            guard let pane else {
+                NSSound.beep()
+                return
+            }
+            _ = workspace.newTerminalSurface(
+                inPane: pane,
+                focus: true,
+                workingDirectory: path,
+                initialCommand: notification.userInfo?["command"] as? String
+            )
+        })
+
         view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: .savedLayoutSaveRequested)) { notification in
             if Self.shouldHandleSavedLayoutSaveRequest(observedWindow: observedWindow, requestedWindow: notification.object as? NSWindow, keyWindow: NSApp.keyWindow, mainWindow: NSApp.mainWindow) {
                 presentSavedLayoutSavePrompt()
@@ -14368,6 +14394,16 @@ struct TabItemView: View, Equatable {
 
         Button(String(localized: "contextMenu.autoNameWorkspace", defaultValue: "Auto-Name Workspace")) {
             triggerManualAutoName(workspaceIds: targetIds)
+        }
+
+        if !isMulti {
+            Button(String(localized: "contextMenu.saveAsProject", defaultValue: "Save as Project")) {
+                guard let workspace = tabManager.tabs.first(where: { $0.id == tab.id }) else {
+                    NSSound.beep()
+                    return
+                }
+                saveWorkspaceAsProject(workspace: workspace)
+            }
         }
 
         if !isMulti {

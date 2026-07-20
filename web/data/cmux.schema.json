@@ -94,6 +94,30 @@
         }
       }
     },
+    "projects": {
+      "title": "projects",
+      "description": "Saved projects: named repo paths surfaced in the command palette as 'Project: <name>', the Toolbelt menu, and the workspace context menu ('Save as Project'). Each opens a terminal at path, in a new workspace or as a tab in the current one.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "path"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Display name; also the opened workspace's title."
+          },
+          "path": {
+            "type": "string",
+            "description": "Repo/project directory (~ expands)."
+          },
+          "template": {
+            "type": "string",
+            "description": "Optional templates entry name whose command runs in the opened terminal."
+          }
+        }
+      }
+    },
     "vault": {
       "title": "vault",
       "description": "Vault session restore agent registrations. cmux includes Pi by default; use this section to add or override JSONL-backed coding agents without an app update.",

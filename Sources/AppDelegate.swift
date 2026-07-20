@@ -5948,6 +5948,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return store?.agentTemplateMenuEntries() ?? []
     }
 
+    /// Saved project entries for the fork menu, resolved like the templates above.
+    func projectMenuEntriesForCommands(preferredWindow: NSWindow?) -> [CmuxProjectMenuEntry] {
+        let store = preferredWindow.flatMap { contextForMainTerminalWindow($0)?.cmuxConfigStore }
+            ?? mainWindowContexts.values.first(where: { $0.cmuxConfigStore != nil })?.cmuxConfigStore
+        return store?.projectMenuEntries() ?? []
+    }
+
     func contextForMainTerminalWindow(_ window: NSWindow, reindex: Bool = true) -> MainWindowContext? {
         guard isMainTerminalWindow(window) else { return nil }
 

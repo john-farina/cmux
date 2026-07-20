@@ -241,6 +241,21 @@ Named agent launch presets, surfaced in the command palette as **New Agent: <nam
 
 Templates share the trust model of `commands`: entries from the global `~/.config/cmux/cmux.json` run immediately; entries from a project-local `cmux.json` show a trust dialog disclosing the cwd, command, and env before first run. A template with the same name as an existing command is ignored (first definition wins).
 
+## `projects`
+
+Saved projects: named repo paths you work from often. Each project surfaces as **Project: <name>** in the command palette and as a submenu in the **Toolbelt** menu with two actions — open the repo in a new workspace, or open it as a tab in the current workspace. The optional `template` names a [`templates`](#templates) entry whose command runs in the opened terminal (for example to launch an agent there directly).
+
+```json
+{
+  "projects": [
+    { "name": "cmux", "path": "~/Developer/cmux" },
+    { "name": "triumph reviewer", "path": "~/Triumph/triumph-sdk-ios", "template": "Reviewer" }
+  ]
+}
+```
+
+Right-click a workspace row > **Save as Project** appends the workspace to this list in the global `cmux.json`: the name comes from the workspace title (auto-naming titles work well here) and the path from the focused terminal's current directory. Saving an already-saved path updates its name in place. A project whose synthesized command name collides with an existing command or template is ignored (first definition wins).
+
 ## `automation.workspaceAutoNaming`
 
 Opt-in AI auto-naming of workspaces and tabs from agent conversation content. When enabled, cmux summarizes supported agent sessions into short sidebar and tab names using each agent's own binary, and refreshes them as the conversation topic shifts. See [workspace-auto-naming.md](workspace-auto-naming.md) for the supported adapter list and full behavior.

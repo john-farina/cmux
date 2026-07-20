@@ -153,6 +153,73 @@ final class CmuxConfigDecodingTests: XCTestCase {
     func testConfigWithoutTemplatesDecodesEmpty() throws {
         let config = try decode("{}")
         XCTAssertTrue(config.templates.isEmpty)
+        XCTAssertTrue(config.projects.isEmpty)
+    }
+
+    // MARK: Projects
+
+    func testDecodeProjects() throws {
+        let json = """
+        {
+          "projects": [
+            { "name": "cmux", "path": "~/Developer/cmux" },
+            { "name": "sdk", "path": "/tmp/sdk", "template": "Reviewer" }
+          ]
+        }
+        """
+        let config = try decode(json)
+        XCTAssertEqual(config.projects.count, 2)
+        XCTAssertEqual(config.projects[0].name, "cmux")
+        XCTAssertEqual(config.projects[0].path, "~/Developer/cmux")
+        XCTAssertNil(config.projects[0].template)
+        XCTAssertEqual(config.projects[1].template, "Reviewer")
+    }
+
+    func testDecodeProjectMissingPathFails() {
+        XCTAssertThrowsError(try decode(#"{ "projects": [{ "name": "Broken" }] }"#))
+    }
+
+    func testDecodeProjectBlankNameFails() {
+        XCTAssertThrowsError(try decode(#"{ "projects": [{ "name": " ", "path": "/tmp" }] }"#))
+    }
+
+    func testProjectSyntheticCommandResolvesTemplateAndPath() throws {
+        let json = """
+        {
+          "templates": [{ "name": "Reviewer", "command": "claude --model opus" }],
+          "projects": [
+            { "name": "cmux", "path": "~/Developer/cmux", "template": "Reviewer" },
+            { "name": "plain", "path": "/tmp/plain" }
+          ]
+        }
+        """
+        let config = try decode(json)
+        let withTemplate = config.projects[0].syntheticCommand(resolvingTemplates: config.templates)
+        XCTAssertEqual(withTemplate.name, "Project: cmux")
+        let workspace = try XCTUnwrap(withTemplate.workspace)
+        XCTAssertEqual(workspace.name, "cmux")
+        XCTAssertEqual(workspace.cwd, ("~/Developer/cmux" as NSString).expandingTildeInPath)
+        guard case .pane(let pane) = try XCTUnwrap(workspace.layout) else {
+            return XCTFail("Expected single-pane layout")
+        }
+        XCTAssertEqual(pane.surfaces.count, 1)
+        XCTAssertEqual(pane.surfaces[0].type, .terminal)
+        XCTAssertEqual(pane.surfaces[0].command, "claude --model opus")
+
+        let plain = config.projects[1].syntheticCommand(resolvingTemplates: config.templates)
+        let plainWorkspace = try XCTUnwrap(plain.workspace)
+        guard case .pane(let plainPane) = try XCTUnwrap(plainWorkspace.layout) else {
+            return XCTFail("Expected single-pane layout")
+        }
+        XCTAssertNil(plainPane.surfaces[0].command)
+    }
+
+    func testProjectSettingCodableRoundTrip() throws {
+        let project = CmuxProject(name: "cmux", path: "~/Developer/cmux", template: "Reviewer")
+        let decoded = try XCTUnwrap(CmuxProject.decodeFromJSON(project.encodeForJSON()))
+        XCTAssertEqual(decoded, project)
+        let bare = CmuxProject(name: "plain", path: "/tmp/plain")
+        XCTAssertEqual(CmuxProject.decodeFromJSON(bare.encodeForJSON()), bare)
     }
 
     func testDecodeNewWorkspaceCommand() throws {

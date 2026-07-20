@@ -6,6 +6,7 @@ extension Notification.Name {
     static let forkImportExternalSessionsRequested = Notification.Name("cmux.fork.importExternalSessionsRequested")
     static let forkAutoNameWorkspaceRequested = Notification.Name("cmux.fork.autoNameWorkspaceRequested")
     static let forkRunConfiguredActionRequested = Notification.Name("cmux.fork.runConfiguredActionRequested")
+    static let forkOpenProjectTabRequested = Notification.Name("cmux.fork.openProjectTabRequested")
 }
 
 /// Fork-added features surfaced as a native menu so they are discoverable
@@ -77,6 +78,35 @@ extension cmuxApp {
                     }
                 }
             }
+            let projects = AppDelegate.shared?.projectMenuEntriesForCommands(
+                preferredWindow: NSApp.keyWindow ?? NSApp.mainWindow
+            ) ?? []
+            if !projects.isEmpty {
+                Divider()
+                ForEach(projects, id: \.id) { project in
+                    Menu(project.name) {
+                        Button(String(
+                            localized: "menu.fork.project.openNewWorkspace",
+                            defaultValue: "Open in New Workspace"
+                        )) {
+                            postForkMenuAction(
+                                .forkRunConfiguredActionRequested,
+                                userInfo: ["actionId": project.id]
+                            )
+                        }
+                        Button(String(
+                            localized: "menu.fork.project.openTabHere",
+                            defaultValue: "Open Tab in Current Workspace"
+                        )) {
+                            var userInfo: [String: Any] = ["path": project.path]
+                            if let command = project.command {
+                                userInfo["command"] = command
+                            }
+                            postForkMenuAction(.forkOpenProjectTabRequested, userInfo: userInfo)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -86,6 +116,57 @@ extension cmuxApp {
             object: NSApp.keyWindow ?? NSApp.mainWindow,
             userInfo: userInfo
         )
+    }
+}
+
+extension CmuxProject: SettingCodable {
+    static func decodeFromUserDefaults(_ raw: Any?) -> CmuxProject? { decodeFromJSON(raw) }
+    func encodeForUserDefaults() -> Any { encodeForJSON() }
+
+    static func decodeFromJSON(_ raw: Any?) -> CmuxProject? {
+        guard let dict = raw as? [String: Any],
+              let name = dict["name"] as? String,
+              let path = dict["path"] as? String else { return nil }
+        return CmuxProject(name: name, path: path, template: dict["template"] as? String)
+    }
+
+    func encodeForJSON() -> Any {
+        var dict: [String: Any] = ["name": name, "path": path]
+        if let template { dict["template"] = template }
+        return dict
+    }
+}
+
+/// Appends the workspace's repo as a saved project in the global cmux.json.
+/// Name comes from the workspace title, path from the focused (or first)
+/// terminal's reported directory. Same-path saves update the name in place.
+/// Shared by the sidebar context menu and any future palette entry.
+@MainActor
+func saveWorkspaceAsProject(workspace: Workspace) {
+    let name = workspace.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    let focusedDirectory = workspace.focusedPanelId.flatMap { workspace.panelDirectories[$0] }
+    let anyDirectory = workspace.orderedPanelIds.lazy.compactMap { workspace.panelDirectories[$0] }.first
+    guard let path = focusedDirectory ?? anyDirectory, !path.isEmpty, !name.isEmpty else {
+        CmuxLog.agentTemplates.log("project.save.no-directory workspace=\(workspace.id.uuidString, privacy: .public)")
+        NSSound.beep()
+        return
+    }
+    Task {
+        let store = JSONConfigStore(fileURL: CmuxConfigLocation().userConfigFile)
+        let key = JSONKey<[CmuxProject]>(id: "projects", defaultValue: [])
+        var projects = await store.value(for: key)
+        if let existing = projects.firstIndex(where: { $0.expandedPath == (path as NSString).expandingTildeInPath }) {
+            projects[existing].name = name
+        } else {
+            projects.append(CmuxProject(name: name, path: path))
+        }
+        do {
+            try await store.set(projects, for: key)
+            CmuxLog.agentTemplates.log("project.save.ok name=\(name, privacy: .public) count=\(projects.count, privacy: .public)")
+        } catch {
+            CmuxLog.agentTemplates.error("project.save.failed error=\(String(describing: error), privacy: .public)")
+            NSSound.beep()
+        }
     }
 }
 

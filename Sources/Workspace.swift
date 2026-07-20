@@ -13048,8 +13048,15 @@ extension Workspace: BonsplitDelegate {
         let entries = combinedProjectEntries(configStore: configStore)
         let menu = NSMenu()
 
-        let paneDirectory = selectedTerminalPanel(inPane: pane).flatMap { panelDirectories[$0.id] }
-            ?? (currentDirectory.isEmpty ? nil : currentDirectory)
+        // Active tab of the pane the button lives in, same fallback chain as
+        // executeSurfaceTabBarCommandButton.
+        let paneDirectory = selectedTerminalPanel(inPane: pane).flatMap { terminal -> String? in
+            for candidate in [panelDirectories[terminal.id], terminal.requestedWorkingDirectory] {
+                let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let trimmed, !trimmed.isEmpty { return trimmed }
+            }
+            return nil
+        } ?? (currentDirectory.isEmpty ? nil : currentDirectory)
         if let currentRepo = paneDirectory.flatMap({ RepoUsageStore.gitRoot(of: $0) }) {
             let savedPaths = Set(configStore?.projectMenuEntries().map(\.path) ?? [])
             if !savedPaths.contains(currentRepo) {

@@ -289,15 +289,21 @@ extension CmuxProject: SettingCodable {
 /// Shared by the sidebar context menu and any future palette entry.
 @MainActor
 func saveWorkspaceAsProject(workspace: Workspace) {
-    let name = workspace.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    let title = workspace.title.trimmingCharacters(in: .whitespacesAndNewlines)
     let focusedDirectory = workspace.focusedPanelId.flatMap { workspace.panelDirectories[$0] }
     let anyDirectory = workspace.orderedPanelIds.lazy.compactMap { workspace.panelDirectories[$0] }.first
-    guard let path = focusedDirectory ?? anyDirectory, !path.isEmpty, !name.isEmpty else {
+    guard let path = focusedDirectory ?? anyDirectory, !path.isEmpty else {
         CmuxLog.agentTemplates.log("project.save.no-directory workspace=\(workspace.id.uuidString, privacy: .public)")
         NSSound.beep()
         return
     }
-    saveProject(name: name, path: path)
+    // why: untitled workspaces show their cwd as title — a path is a useless
+    // project name, so path-like titles fall back to the repo folder name.
+    let root = RepoUsageStore.gitRoot(of: path) ?? path
+    let titleIsPathLike = title.isEmpty || title.contains("/")
+        || title.hasPrefix("…") || title.hasPrefix("~")
+    let name = titleIsPathLike ? (root as NSString).lastPathComponent : title
+    saveProject(name: name, path: root)
 }
 
 /// Appends (or renames, on a same-path save) a project in the global

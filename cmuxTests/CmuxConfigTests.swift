@@ -2337,6 +2337,15 @@ final class RepoUsageStoreTests: XCTestCase {
         XCTAssertEqual(store.topRepos(), [innerRoot.path])
     }
 
+    func testTopReposDropsAncestorsOfSavedPaths() throws {
+        let outer = try makeRepo("triumph-sdk")
+        let savedInner = URL(fileURLWithPath: outer.root).appendingPathComponent("ios", isDirectory: true).path
+        store.recordOpen(path: outer.root)
+        // Only the outer repo is tracked, but a saved project sits inside it:
+        // the tracked ancestor must not resurface next to the saved entry.
+        XCTAssertEqual(store.topRepos(excluding: [savedInner]), [])
+    }
+
     func testUsagePersistsAcrossInstances() throws {
         let alpha = try makeRepo("alpha").root
         store.recordOpen(path: alpha)

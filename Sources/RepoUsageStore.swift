@@ -55,14 +55,15 @@ final class RepoUsageStore {
 
     /// Auto-detected repos by usage, highest first, excluding `excluding`
     /// paths. Nested repos (submodules, repo-in-repo) dedupe to the deepest
-    /// path: an ancestor of another tracked repo is dropped.
+    /// path: an ancestor of another tracked repo — or of an excluded (saved)
+    /// path — is dropped.
     func topRepos(excluding: Set<String> = [], limit: Int = 8) -> [String] {
         loadIfNeeded()
-        let all = Set(repos.keys)
+        let deeperCandidates = Set(repos.keys).union(excluding)
         return repos
             .filter { candidate in
                 guard !excluding.contains(candidate.key) else { return false }
-                return !all.contains { $0 != candidate.key && $0.hasPrefix(candidate.key + "/") }
+                return !deeperCandidates.contains { $0 != candidate.key && $0.hasPrefix(candidate.key + "/") }
             }
             .sorted { ($0.value.count, $0.value.lastUsed) > ($1.value.count, $1.value.lastUsed) }
             .prefix(limit)

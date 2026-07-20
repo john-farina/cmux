@@ -228,42 +228,9 @@ extension CMUXCLI {
             reportAutoNamingProblem("failed", agent: "claude", workspaceId: workspaceId, client: client)
             return
         }
-
-        let env = ProcessInfo.processInfo.environment
-        let engine = AutoNamingEngine()
-        let probe = (try? client.sendV2(
-            method: "workspace.set_auto_title",
-            params: ["probe": true, "workspace_id": workspaceId]
-        )) ?? [:]
-        let resolution = resolvedSummarizerAgent(
-            probe: probe, sessionAgent: "claude", env: env, telemetry: telemetry
-        )
-        let list = tabTitles.map { "- \($0)" }.joined(separator: "\n")
-        let prompt = """
-        These terminal tabs run in one workspace:
-        \(list)
-
-        Respond with ONLY a 2-5 word name describing the workspace's overall work. No punctuation, no quotes, no explanation.
-        """
-        let synthesized = summarize(
-            summarizerAgent: resolution.agent,
-            prompt: prompt,
-            env: env,
-            timeout: engine.config.llmTimeout,
-            telemetry: telemetry
-        ).flatMap { engine.sanitizeResponse($0, currentTitle: nil) }
-        // why: a failed synthesis still resolves the pill — first tab title stands in
-        let workspaceTitle = synthesized ?? tabTitles[0]
-        _ = applyAutoNamingTitle(
-            workspaceTitle,
-            workspaceId: workspaceId,
-            surfaceId: nil,
-            previousTitle: nil,
-            client: client,
-            telemetryKey: "claude-hook.auto-name.synthesis",
-            telemetry: telemetry,
-            manual: true
-        )
+        // why: no synthesis pass — the app joins all tab titles into the
+        // workspace title on every panel apply, which also resolves the pill.
+        manualAutoNameLog.log("auto-name.manual.done workspace=\(workspaceId, privacy: .public) named=\(tabTitles.count, privacy: .public)")
     }
 
     /// Spawns a detached generic-agent auto-name pass via a bounded shell wrapper.

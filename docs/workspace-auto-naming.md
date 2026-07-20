@@ -6,7 +6,8 @@ On by default; manual renames always win and stop auto-naming for that workspace
 
 ## What it does
 
-- At the end of an agent turn, cmux summarizes the session's recent conversation into a 2-5 word title (in the conversation's language) and applies it to the workspace. When a workspace has multiple tabs, the agent's own tab is named too.
+- At the end of an agent turn, cmux summarizes the session's recent conversation into a 2-5 word title (in the conversation's language). A single-tab workspace takes that title directly. In a multi-tab workspace the title names the agent's own tab, and the workspace title becomes a "/" join of every tab's current title (e.g. `Feat1/Feat2/Feat3`), refreshed whenever any tab is named — one session's topic never overwrites the others.
+- Titles always land on the workspace that currently contains the agent's pane: hook records capture the workspace at agent start, so the app re-resolves the target by pane id at apply time, and a tab dragged to another workspace keeps naming its new home instead of the old one.
 - Names refresh when the topic shifts, throttled by transcript growth and a minimum interval, so quiet or single-topic sessions converge to a stable name without repeated summarization calls.
 - Summarization runs through your own agent binary: `claude -p` for Claude Code sessions (model from `ANTHROPIC_SMALL_FAST_MODEL` when set, the fast default otherwise; Vertex/Bedrock backend selection is preserved), `codex exec` for Codex sessions, and each supported hook agent's own non-interactive CLI for its sessions. Each agent names itself, so the calls use the account you already authenticated, and a machine without another agent installed simply skips that adapter.
 
@@ -44,4 +45,4 @@ The other hook integrations are intentionally skipped for now:
 
 ## Mechanics
 
-The Claude Code wrapper registers an async `Stop` hook (`cmux hooks claude auto-name`); other supported agents spawn an equivalent detached pass from their turn-end hook. Each pass reads the adapter's transcript source, evaluates the throttle against per-session state in `~/.cmuxterm/<agent>-hook-sessions.json`, and applies the title through the `workspace.set_auto_title` socket method, which enforces the setting and the user-provenance rule app-side.
+The Claude Code wrapper registers an async `Stop` hook (`cmux hooks claude auto-name`); other supported agents spawn an equivalent detached pass from their turn-end hook. Each pass reads the adapter's transcript source, evaluates the throttle against per-session state in `~/.cmuxterm/<agent>-hook-sessions.json`, and applies the title through the `workspace.set_auto_title` socket method, which enforces the setting and the user-provenance rule app-side. The app is the authority on placement: it resolves the target workspace from the pane id (falling back to the caller's workspace id when no pane is given) and computes the multi-tab "/" join itself, so the manual all-tabs pass needs no separate workspace-synthesis LLM call.

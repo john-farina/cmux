@@ -293,6 +293,62 @@ import Testing
         }
     }
 
+    /// Regression: hook session records carry the workspace id from agent
+    /// start; after the tab moves, the workspace that actually contains the
+    /// panel must win over the caller's stale workspace_id.
+    @Test func panelIdResolvesLiveWorkspaceOverStaleWorkspaceId() throws {
+        try withAutoNamingSetting(true) {
+            try withManager { manager, staleWorkspace in
+                let liveWorkspace = manager.addTab(select: false)
+                // addTab's workspace already carries its initial terminal panel.
+                let panelId = try #require(liveWorkspace.panels.keys.first)
+
+                let envelope = try call(method: "workspace.set_auto_title", params: [
+                    "workspace_id": staleWorkspace.id.uuidString,
+                    "panel_id": panelId.uuidString,
+                    "title": "Fix auth bug"
+                ])
+                let result = try #require(envelope["result"] as? [String: Any])
+                #expect(result["workspace_applied"] as? Bool == true)
+                #expect(result["workspace_id"] as? String == liveWorkspace.id.uuidString)
+                #expect(liveWorkspace.title == "Fix auth bug")
+                #expect(staleWorkspace.effectiveCustomTitleSource != .auto)
+            }
+        }
+    }
+
+    /// Multi-tab workspaces title as a "/" join of every tab's current title;
+    /// a session naming one tab never overwrites the siblings' topics.
+    @Test func multiPanelWorkspaceTitleJoinsAllTabTitles() throws {
+        try withAutoNamingSetting(true) {
+            try withManager { _, workspace in
+                let pane = try #require(workspace.bonsplitController.allPaneIds.first)
+                let firstPanel = try #require(workspace.newTerminalSurface(inPane: pane, focus: true)?.id)
+                let secondPanel = try #require(workspace.newTerminalSurface(inPane: pane, focus: false)?.id)
+
+                _ = try call(method: "workspace.set_auto_title", params: [
+                    "workspace_id": workspace.id.uuidString,
+                    "panel_id": firstPanel.uuidString,
+                    "title": "Feat1"
+                ])
+                let envelope = try call(method: "workspace.set_auto_title", params: [
+                    "workspace_id": workspace.id.uuidString,
+                    "panel_id": secondPanel.uuidString,
+                    "title": "Feat2"
+                ])
+                let result = try #require(envelope["result"] as? [String: Any])
+                #expect(result["panel_applied"] as? Bool == true)
+                #expect(workspace.panelCustomTitles[firstPanel] == "Feat1")
+                #expect(workspace.panelCustomTitles[secondPanel] == "Feat2")
+                #expect(result["workspace_applied"] as? Bool == true)
+                #expect(workspace.title.contains("Feat1"))
+                #expect(workspace.title.contains("Feat2"))
+                #expect(workspace.title.contains("/"))
+                #expect(workspace.effectiveCustomTitleSource == .auto)
+            }
+        }
+    }
+
     @Test func malformedParamsProduceCleanErrors() throws {
         try withAutoNamingSetting(true) {
             try withManager { _, workspace in

@@ -3786,21 +3786,24 @@ class TerminalController {
         let title = titleRaw.trimmingCharacters(in: .whitespacesAndNewlines)
         let panelOnlyIfMultiple = v2Bool(params, "panel_only_if_multiple") ?? false
         var found = false
+        var appliedWorkspaceId = workspaceId
         var workspaceApplied = false
         var panelApplied: Bool?
         let panelOnly = v2Bool(params, "panel_only") ?? false
         v2MainSync {
-            guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else { return }
-            found = true
-            if !panelOnly {
-                if manual, workspace.effectiveCustomTitleSource == .user {
-                    tabManager.clearCustomTitle(tabId: workspaceId)
-                }
-                workspaceApplied = tabManager.setCustomTitle(tabId: workspaceId, title: title, source: .auto)
-                if workspaceApplied {
-                    workspace.clearAutoNamingStatus()
-                }
+            // why: hook workspace ids go stale when a tab moves workspaces;
+            // the workspace currently containing the panel wins.
+            var resolvedWorkspace = tabManager.tabs.first(where: { $0.id == workspaceId })
+            if let panelId,
+               let live = tabManager.tabs.first(where: {
+                   $0.panels[panelId] != nil || $0.panelIdFromSurfaceId(TabID(uuid: panelId)) != nil
+               }) {
+                resolvedWorkspace = live
             }
+            guard let workspace = resolvedWorkspace else { return }
+            found = true
+            appliedWorkspaceId = workspace.id
+            let multiPanel = workspace.panels.count >= 2
             if let panelId {
                 // Hook payloads carry surface ids; accept either a panel id
                 // or a surface id for the tab target.
@@ -3808,8 +3811,28 @@ class TerminalController {
                     ? panelId
                     : workspace.panelIdFromSurfaceId(TabID(uuid: panelId))
                 if let resolvedPanelId,
-                   !(panelOnlyIfMultiple && workspace.panels.count < 2) {
+                   !(panelOnlyIfMultiple && !multiPanel) {
                     panelApplied = workspace.setPanelCustomTitle(panelId: resolvedPanelId, title: title, source: .auto)
+                }
+            }
+            // why: multi-tab workspace title is a join of every tab's title
+            // (Feat1/Feat2), so one session's topic never overwrites the rest.
+            let workspaceTitle: String?
+            if multiPanel {
+                let parts = workspace.orderedPanelIds
+                    .compactMap { workspace.panelTitle(panelId: $0)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                workspaceTitle = parts.isEmpty ? nil : parts.joined(separator: "/")
+            } else {
+                workspaceTitle = panelOnly ? nil : title
+            }
+            if let workspaceTitle {
+                if manual, workspace.effectiveCustomTitleSource == .user {
+                    tabManager.clearCustomTitle(tabId: workspace.id)
+                }
+                workspaceApplied = tabManager.setCustomTitle(tabId: workspace.id, title: workspaceTitle, source: .auto)
+                if workspaceApplied {
+                    workspace.clearAutoNamingStatus()
                 }
             }
         }
@@ -3828,8 +3851,8 @@ class TerminalController {
         }
 
         return .ok([
-            "workspace_id": workspaceId.uuidString,
-            "workspace_ref": v2Ref(kind: .workspace, uuid: workspaceId),
+            "workspace_id": appliedWorkspaceId.uuidString,
+            "workspace_ref": v2Ref(kind: .workspace, uuid: appliedWorkspaceId),
             "title": title,
             "workspace_applied": workspaceApplied,
             "panel_applied": v2OrNull(panelApplied),

@@ -13057,9 +13057,14 @@ extension Workspace: BonsplitDelegate {
             }
             return nil
         } ?? (currentDirectory.isEmpty ? nil : currentDirectory)
-        if let currentRepo = paneDirectory.flatMap({ RepoUsageStore.gitRoot(of: $0) }) {
-            let savedPaths = Set(configStore?.projectMenuEntries().map(\.path) ?? [])
-            if !savedPaths.contains(currentRepo) {
+        if let paneDirectory,
+           let currentRepo = RepoUsageStore.gitRoot(of: paneDirectory) {
+            let cwd = (paneDirectory as NSString).expandingTildeInPath
+            let savedPaths = configStore?.projectMenuEntries().map(\.path) ?? []
+            // why: saved projects can be subdirs of a repo (triumph-sdk/ios) —
+            // hide the add item whenever the cwd is inside any saved path.
+            let coveredBySaved = savedPaths.contains { cwd == $0 || cwd.hasPrefix($0 + "/") }
+            if !coveredBySaved {
                 let format = String(
                     localized: "tabBar.projects.addCurrent",
                     defaultValue: "Add \"%@\" to Projects"

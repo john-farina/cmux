@@ -96,6 +96,14 @@ func mutateProjects(logKey: String, _ mutate: (inout [CmuxProject]) -> Void) asy
     }
 }
 
+/// Saved project paths straight from the config file — no watcher lag, so
+/// the add affordance flips the instant a save lands.
+func savedProjectPathsSnapshot() -> [String] {
+    JSONConfigStore(fileURL: CmuxConfigLocation().userConfigFile)
+        .snapshotValue(for: JSONKey<[CmuxProject]>(id: "projects", defaultValue: []))
+        .map(\.expandedPath)
+}
+
 /// Removes the saved project whose expanded path matches, from the global
 /// cmux.json. Auto-detected entries are not stored there and can't be removed.
 @MainActor
@@ -190,19 +198,13 @@ func openRepoProject(
     }
 }
 
-/// Saved projects (usage-sorted, config order breaking ties) followed by
-/// auto-detected repos from RepoUsageStore, for every project menu.
+/// Saved projects and auto-detected repos merged into one list, sorted by
+/// frecency (visit count decayed by recency) so the current work is on top.
+/// Saved entries win ties, then config order.
 @MainActor
 func combinedProjectEntries(configStore: CmuxConfigStore?) -> [CmuxProjectMenuEntry] {
     let saved = configStore?.projectMenuEntries() ?? []
     let usage = RepoUsageStore.shared
-    let sortedSaved = saved.enumerated()
-        .sorted { lhs, rhs in
-            let lhsCount = usage.usageCount(path: lhs.element.path)
-            let rhsCount = usage.usageCount(path: rhs.element.path)
-            return lhsCount != rhsCount ? lhsCount > rhsCount : lhs.offset < rhs.offset
-        }
-        .map(\.element)
     let savedPaths = Set(saved.map(\.path))
     let autoPaths = usage.topRepos(excluding: savedPaths)
     // why: nested repos surface as "parent/child" so two repos whose folder
@@ -219,7 +221,17 @@ func combinedProjectEntries(configStore: CmuxConfigStore?) -> [CmuxProjectMenuEn
             command: nil
         )
     }
-    return sortedSaved + auto
+    return (saved + auto).enumerated()
+        .sorted { lhs, rhs in
+            let lhsScore = usage.frecency(path: lhs.element.path)
+            let rhsScore = usage.frecency(path: rhs.element.path)
+            if lhsScore != rhsScore { return lhsScore > rhsScore }
+            if lhs.element.isAutoDetected != rhs.element.isAutoDetected {
+                return !lhs.element.isAutoDetected
+            }
+            return lhs.offset < rhs.offset
+        }
+        .map(\.element)
 }
 
 /// Fork-added features surfaced as a native menu so they are discoverable

@@ -53,6 +53,15 @@ final class RepoUsageStore {
         return repos[path]?.count ?? 0
     }
 
+    /// Frecency: visit count decayed by days since last use, so current work
+    /// sorts above an old pile of visits.
+    func frecency(path: String, now: Date = Date()) -> Double {
+        loadIfNeeded()
+        guard let entry = repos[path] else { return 0 }
+        let ageDays = max(0, now.timeIntervalSince1970 - entry.lastUsed) / 86_400
+        return Double(entry.count) / (1.0 + ageDays)
+    }
+
     /// Auto-detected repos by usage, highest first, excluding `excluding`
     /// paths. Nested repos (submodules, repo-in-repo) dedupe to the deepest
     /// path: an ancestor of another tracked repo — or of an excluded (saved)
@@ -65,7 +74,9 @@ final class RepoUsageStore {
                 guard !excluding.contains(candidate.key) else { return false }
                 return !deeperCandidates.contains { $0 != candidate.key && $0.hasPrefix(candidate.key + "/") }
             }
-            .sorted { ($0.value.count, $0.value.lastUsed) > ($1.value.count, $1.value.lastUsed) }
+            .sorted {
+                (frecency(path: $0.key), $0.value.lastUsed) > (frecency(path: $1.key), $1.value.lastUsed)
+            }
             .prefix(limit)
             .map(\.key)
     }

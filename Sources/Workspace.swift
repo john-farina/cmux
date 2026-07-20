@@ -13076,7 +13076,9 @@ extension Workspace: BonsplitDelegate {
             directorySource = "workspace"
         }
         let currentRepo = paneDirectory.flatMap { RepoUsageStore.gitRoot(of: $0) }
-        let savedPaths = configStore?.projectMenuEntries().map(\.path) ?? []
+        // why: read saved paths from the file, not the config store — the
+        // store's watcher lags a just-clicked save and re-offers the add item.
+        let savedPaths = savedProjectPathsSnapshot()
         let cwd = paneDirectory.map { ($0 as NSString).expandingTildeInPath }
         // why: saved projects can be subdirs of a repo (triumph-sdk/ios) —
         // the add item hides whenever the cwd is inside any saved path.

@@ -2346,6 +2346,17 @@ final class RepoUsageStoreTests: XCTestCase {
         XCTAssertEqual(store.topRepos(excluding: [savedInner]), [])
     }
 
+    func testTopReposFrecencyFavorsRecentWorkOverOldPiles() throws {
+        let old = try makeRepo("old-grind").root
+        let fresh = try makeRepo("fresh").root
+        let monthAgo = Date(timeIntervalSinceNow: -30 * 86_400)
+        store.recordOpen(path: old, now: monthAgo)
+        store.recordOpen(path: old, now: monthAgo)
+        store.recordOpen(path: old, now: monthAgo)
+        store.recordOpen(path: fresh)
+        XCTAssertEqual(store.topRepos(), [fresh, old])
+    }
+
     func testUsagePersistsAcrossInstances() throws {
         let alpha = try makeRepo("alpha").root
         store.recordOpen(path: alpha)

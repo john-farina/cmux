@@ -2323,6 +2323,20 @@ final class RepoUsageStoreTests: XCTestCase {
         XCTAssertEqual(store.topRepos(excluding: [beta]), [alpha])
     }
 
+    func testTopReposDropsAncestorsOfNestedRepos() throws {
+        let outer = try makeRepo("triumph-sdk")
+        let innerRoot = URL(fileURLWithPath: outer.root).appendingPathComponent("ios", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: innerRoot.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        store.recordOpen(path: outer.root)
+        store.recordOpen(path: outer.root)
+        store.recordOpen(path: innerRoot.path)
+        // The outer repo is an ancestor of the nested one: only the deepest shows.
+        XCTAssertEqual(store.topRepos(), [innerRoot.path])
+    }
+
     func testUsagePersistsAcrossInstances() throws {
         let alpha = try makeRepo("alpha").root
         store.recordOpen(path: alpha)

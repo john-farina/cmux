@@ -13036,17 +13036,44 @@ extension Workspace: BonsplitDelegate {
     }
 
     /// fork: the tab-bar "projects" button — pops the usage-sorted project
-    /// list; picking one opens a tab at that repo in this pane.
+    /// list; picking one opens a tab at that repo in this pane. When the
+    /// pane's terminal sits in a repo that isn't saved yet, the menu offers
+    /// "Add … to Projects".
     private func showProjectsTabBarMenu(inPane pane: PaneID, presentingWindow: NSWindow?) {
-        let entries = combinedProjectEntries(
-            configStore: AppDelegate.shared?.contextForMainWindow(presentingWindow)?.cmuxConfigStore
-                ?? owningTabManager.flatMap { manager in
-                    AppDelegate.shared?.mainWindowContexts.values
-                        .first(where: { $0.tabManager === manager })?.cmuxConfigStore
-                }
-        )
+        let configStore = AppDelegate.shared?.contextForMainWindow(presentingWindow)?.cmuxConfigStore
+            ?? owningTabManager.flatMap { manager in
+                AppDelegate.shared?.mainWindowContexts.values
+                    .first(where: { $0.tabManager === manager })?.cmuxConfigStore
+            }
+        let entries = combinedProjectEntries(configStore: configStore)
         let menu = NSMenu()
-        if entries.isEmpty {
+
+        let paneDirectory = selectedTerminalPanel(inPane: pane).flatMap { panelDirectories[$0.id] }
+            ?? (currentDirectory.isEmpty ? nil : currentDirectory)
+        if let currentRepo = paneDirectory.flatMap({ RepoUsageStore.gitRoot(of: $0) }) {
+            let savedPaths = Set(configStore?.projectMenuEntries().map(\.path) ?? [])
+            if !savedPaths.contains(currentRepo) {
+                let format = String(
+                    localized: "tabBar.projects.addCurrent",
+                    defaultValue: "Add \"%@\" to Projects"
+                )
+                let repoName = (currentRepo as NSString).lastPathComponent
+                let item = NSMenuItem(
+                    title: String(format: format, repoName),
+                    action: #selector(ProjectTabBarMenuHandler.addCurrentRepoToProjects(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = ProjectTabBarMenuHandler.shared
+                item.toolTip = currentRepo
+                item.image = NSImage(systemSymbolName: "plus.circle", accessibilityDescription: nil)
+                item.representedObject = ProjectTabBarMenuHandler.AddBox(name: repoName, path: currentRepo)
+                menu.addItem(item)
+                if !entries.isEmpty {
+                    menu.addItem(.separator())
+                }
+            }
+        }
+        if entries.isEmpty, menu.items.isEmpty {
             let empty = NSMenuItem(
                 title: String(
                     localized: "tabBar.projects.empty",

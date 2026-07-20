@@ -28,6 +28,25 @@ final class ProjectTabBarMenuHandler: NSObject {
         }
     }
 
+    /// Box for the "Add … to Projects" item: the current repo, not yet saved.
+    final class AddBox: NSObject {
+        let name: String
+        let path: String
+
+        init(name: String, path: String) {
+            self.name = name
+            self.path = path
+        }
+    }
+
+    @objc func addCurrentRepoToProjects(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? AddBox else {
+            NSSound.beep()
+            return
+        }
+        saveProject(name: box.name, path: box.path)
+    }
+
     @objc func openProject(_ sender: NSMenuItem) {
         guard let box = sender.representedObject as? Box,
               let workspace = box.workspace else {
@@ -104,10 +123,17 @@ func combinedProjectEntries(configStore: CmuxConfigStore?) -> [CmuxProjectMenuEn
         }
         .map(\.element)
     let savedPaths = Set(saved.map(\.path))
-    let auto = usage.topRepos(excluding: savedPaths).map { path in
-        CmuxProjectMenuEntry(
+    let autoPaths = usage.topRepos(excluding: savedPaths)
+    // why: nested repos surface as "parent/child" so two repos whose folder
+    // is named e.g. "ios" stay tellable apart.
+    let basenames = autoPaths.map { ($0 as NSString).lastPathComponent }
+    let auto = autoPaths.map { path in
+        let base = (path as NSString).lastPathComponent
+        let parent = ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent
+        let ambiguous = basenames.filter { $0 == base }.count > 1
+        return CmuxProjectMenuEntry(
             id: "cmux.fork.autoProject.\(path)",
-            name: (path as NSString).lastPathComponent,
+            name: ambiguous && !parent.isEmpty ? "\(parent)/\(base)" : base,
             path: path,
             command: nil
         )
@@ -271,6 +297,14 @@ func saveWorkspaceAsProject(workspace: Workspace) {
         NSSound.beep()
         return
     }
+    saveProject(name: name, path: path)
+}
+
+/// Appends (or renames, on a same-path save) a project in the global
+/// cmux.json. Shared by the sidebar save item and the tab-bar folder menu's
+/// "Add to Projects".
+@MainActor
+func saveProject(name: String, path: String) {
     Task {
         let store = JSONConfigStore(fileURL: CmuxConfigLocation().userConfigFile)
         let key = JSONKey<[CmuxProject]>(id: "projects", defaultValue: [])

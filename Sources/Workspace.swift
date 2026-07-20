@@ -4534,6 +4534,10 @@ final class Workspace: Identifiable, ObservableObject {
         }
         let directoryChanged = panelDirectories[panelId] != trimmed
         if directoryChanged || provenanceChanged { panelDirectories[panelId] = trimmed }
+        // fork: local cwd changes feed the auto-detected project/repo list
+        if directoryChanged, source == .liveReport, !isRemoteTerminalReport {
+            RepoUsageStore.shared.recordActivity(directory: trimmed)
+        }
         let trimmedDisplayLabel = displayLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmedDisplayLabel.isEmpty {
             if panelDirectoryDisplayLabels[panelId] != trimmedDisplayLabel {
@@ -13031,6 +13035,48 @@ extension Workspace: BonsplitDelegate {
         return terminalPanel(for: panelId)
     }
 
+    /// fork: the tab-bar "projects" button — pops the usage-sorted project
+    /// list; picking one opens a tab at that repo in this pane.
+    private func showProjectsTabBarMenu(inPane pane: PaneID, presentingWindow: NSWindow?) {
+        let entries = combinedProjectEntries(
+            configStore: AppDelegate.shared?.contextForMainWindow(presentingWindow)?.cmuxConfigStore
+                ?? owningTabManager.flatMap { manager in
+                    AppDelegate.shared?.mainWindowContexts.values
+                        .first(where: { $0.tabManager === manager })?.cmuxConfigStore
+                }
+        )
+        let menu = NSMenu()
+        if entries.isEmpty {
+            let empty = NSMenuItem(
+                title: String(
+                    localized: "tabBar.projects.empty",
+                    defaultValue: "No Projects Yet — repos you work in appear here"
+                ),
+                action: nil,
+                keyEquivalent: ""
+            )
+            empty.isEnabled = false
+            menu.addItem(empty)
+        }
+        for entry in entries {
+            let item = NSMenuItem(
+                title: entry.name,
+                action: #selector(ProjectTabBarMenuHandler.openProject(_:)),
+                keyEquivalent: ""
+            )
+            item.target = ProjectTabBarMenuHandler.shared
+            item.toolTip = entry.path
+            item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+            item.representedObject = ProjectTabBarMenuHandler.Box(
+                workspace: self,
+                pane: pane,
+                entry: entry
+            )
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
     private func executeSurfaceTabBarCommandButton(identifier: String, inPane pane: PaneID) {
         guard let executable = surfaceTabBarCommandButtons[identifier] else {
             return
@@ -13051,6 +13097,8 @@ extension Workspace: BonsplitDelegate {
                 )
             case .mobileConnect:
                 MobilePairingWindowController.shared.show()
+            case .projects:
+                showProjectsTabBarMenu(inPane: pane, presentingWindow: presentingWindow)
             case .newTerminal, .newBrowser, .splitRight, .splitDown:
                 break
             }

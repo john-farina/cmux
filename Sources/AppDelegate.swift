@@ -5948,11 +5948,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return store?.agentTemplateMenuEntries() ?? []
     }
 
-    /// Saved project entries for the fork menu, resolved like the templates above.
+    /// Saved + auto-detected project entries for the fork menus, usage-sorted.
     func projectMenuEntriesForCommands(preferredWindow: NSWindow?) -> [CmuxProjectMenuEntry] {
         let store = preferredWindow.flatMap { contextForMainTerminalWindow($0)?.cmuxConfigStore }
             ?? mainWindowContexts.values.first(where: { $0.cmuxConfigStore != nil })?.cmuxConfigStore
-        return store?.projectMenuEntries() ?? []
+        return combinedProjectEntries(configStore: store)
     }
 
     func contextForMainTerminalWindow(_ window: NSWindow, reindex: Bool = true) -> MainWindowContext? {
@@ -15553,6 +15553,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 return didStart
             case .mobileConnect:
                 MobilePairingWindowController.shared.show()
+                onExecuted?()
+                return true
+            case .projects:
+                showProjectsPickerMenu(context: context)
                 onExecuted?()
                 return true
             case .newTerminal:

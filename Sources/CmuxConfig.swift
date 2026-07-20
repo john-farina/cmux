@@ -966,7 +966,10 @@ struct CmuxSurfaceTabBarButton: Codable, Sendable, Hashable, Identifiable {
 
     static let mobileConnect = actionReference(CmuxSurfaceTabBarBuiltInAction.mobileConnect.configID)
 
+    static let projects = actionReference(CmuxSurfaceTabBarBuiltInAction.projects.configID)
+
     static let defaults: [CmuxSurfaceTabBarButton] = [
+        .projects,
         .newTerminal,
         .newBrowser,
         .splitRight,
@@ -1415,6 +1418,9 @@ struct CmuxResolvedConfigAction: Identifiable, Sendable, Hashable {
         case .splitDown:
             title = String(localized: "command.terminalSplitDown.title", defaultValue: "Split Down")
             keywords = ["terminal", "split", "down"]
+        case .projects:
+            title = String(localized: "command.projects.title", defaultValue: "Open Project")
+            keywords = ["project", "repo", "repository", "open", "folder"]
         }
 
         return CmuxResolvedConfigAction(

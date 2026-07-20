@@ -19,6 +19,17 @@ private enum NewWorkspaceContextMenuSection {
     case cloudVM
 }
 
+@MainActor
+private final class NewWorkspaceProjectMenuBox: NSObject {
+    let windowId: UUID
+    let entry: CmuxProjectMenuEntry
+
+    init(windowId: UUID, entry: CmuxProjectMenuEntry) {
+        self.windowId = windowId
+        self.entry = entry
+    }
+}
+
 extension AppDelegate {
 
     @discardableResult
@@ -100,6 +111,7 @@ extension AppDelegate {
             }
         }
 
+        appendProjectMenuItems(to: menu, context: context, cmuxConfigStore: cmuxConfigStore)
         appendSavedLayoutMenuItems(to: menu, windowId: context.windowId)
         appendWorkspaceActionAffordances(
             to: menu,
@@ -170,6 +182,79 @@ extension AppDelegate {
         }
         guard menuItems.contains(where: { !$0.isSeparatorItem }) else { return [] }
         return menuItems
+    }
+
+    /// fork: "New Workspace in Project" submenu — usage-sorted saved +
+    /// auto-detected repos; picking one opens a new workspace at the repo.
+    private func appendProjectMenuItems(
+        to menu: NSMenu,
+        context: MainWindowContext,
+        cmuxConfigStore: CmuxConfigStore
+    ) {
+        let entries = combinedProjectEntries(configStore: cmuxConfigStore)
+        guard !entries.isEmpty else { return }
+        let submenu = NSMenu()
+        for entry in entries {
+            let item = NSMenuItem(
+                title: entry.name,
+                action: #selector(performNewWorkspaceProjectMenuItem(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.toolTip = entry.path
+            item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+            item.representedObject = NewWorkspaceProjectMenuBox(windowId: context.windowId, entry: entry)
+            submenu.addItem(item)
+        }
+        let parent = NSMenuItem(
+            title: String(
+                localized: "menu.newWorkspace.inProject",
+                defaultValue: "New Workspace in Project"
+            ),
+            action: nil,
+            keyEquivalent: ""
+        )
+        parent.submenu = submenu
+        appendNewWorkspaceMenuSection([parent], to: menu)
+    }
+
+    /// fork: standalone project picker (palette "Open Project" built-in) —
+    /// same entries as the plus-button submenu, popped at the mouse.
+    func showProjectsPickerMenu(context: MainWindowContext) {
+        let entries = combinedProjectEntries(configStore: context.cmuxConfigStore)
+        guard !entries.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        let menu = NSMenu()
+        for entry in entries {
+            let item = NSMenuItem(
+                title: entry.name,
+                action: #selector(performNewWorkspaceProjectMenuItem(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.toolTip = entry.path
+            item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+            item.representedObject = NewWorkspaceProjectMenuBox(windowId: context.windowId, entry: entry)
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    @objc private func performNewWorkspaceProjectMenuItem(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? NewWorkspaceProjectMenuBox,
+              let context = mainWindowContexts.values.first(where: { $0.windowId == box.windowId }) else {
+            NSSound.beep()
+            return
+        }
+        openRepoProject(
+            name: box.entry.name,
+            path: box.entry.path,
+            command: box.entry.command,
+            placement: .newWorkspace,
+            tabManager: context.tabManager
+        )
     }
 
     private func appendNewWorkspaceMenuSection(_ items: [NSMenuItem], to menu: NSMenu) {

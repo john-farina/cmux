@@ -243,7 +243,9 @@ Templates share the trust model of `commands`: entries from the global `~/.confi
 
 ## `projects`
 
-Saved projects: named repo paths you work from often. Each project surfaces as **Project: <name>** in the command palette and as a submenu in the **Toolbelt** menu with two actions — open the repo in a new workspace, or open it as a tab in the current workspace. The optional `template` names a [`templates`](#templates) entry whose command runs in the opened terminal (for example to launch an agent there directly).
+Saved projects: named repo paths you work from often. Each project surfaces as **Project: <name>** in the command palette, as a submenu in the **Toolbelt** menu, in the tab bar's folder button (opens a tab at the repo in the current workspace), and in the new-workspace plus-button menu under **New Workspace in Project**. The optional `template` names a [`templates`](#templates) entry whose command runs in the opened terminal (for example to launch an agent there directly).
+
+cmux also auto-detects repos: terminal directory changes are normalized to their git root and counted in `~/.cmuxterm/repo-usage.json` (at most once per repo per 30 minutes). Project menus list saved projects first (sorted by usage), then the most-used auto-detected repos not already saved. Opening a project from any menu also bumps its usage.
 
 ```json
 {

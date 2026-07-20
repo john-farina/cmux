@@ -2261,3 +2261,73 @@ final class CmuxLayoutEncodingTests: XCTestCase {
         }
     }
 }
+
+/// fork: repo usage tracking behind the project menus.
+@MainActor
+final class RepoUsageStoreTests: XCTestCase {
+    private var tempDir: URL!
+    private var store: RepoUsageStore!
+
+    override func setUp() async throws {
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("repo-usage-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        store = RepoUsageStore(fileURL: tempDir.appendingPathComponent("usage.json"))
+    }
+
+    override func tearDown() async throws {
+        try? FileManager.default.removeItem(at: tempDir)
+    }
+
+    private func makeRepo(_ name: String, subpath: String = "") throws -> (root: String, inner: String) {
+        let root = tempDir.appendingPathComponent(name, isDirectory: true)
+        let gitDir = root.appendingPathComponent(".git", isDirectory: true)
+        try FileManager.default.createDirectory(at: gitDir, withIntermediateDirectories: true)
+        var inner = root
+        if !subpath.isEmpty {
+            inner = root.appendingPathComponent(subpath, isDirectory: true)
+            try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true)
+        }
+        return (root.path, inner.path)
+    }
+
+    func testGitRootNormalizesSubdirectories() throws {
+        let repo = try makeRepo("alpha", subpath: "Sources/Deep/Nested")
+        XCTAssertEqual(RepoUsageStore.gitRoot(of: repo.inner), repo.root)
+        XCTAssertEqual(RepoUsageStore.gitRoot(of: repo.root), repo.root)
+    }
+
+    func testGitRootReturnsNilOutsideRepos() throws {
+        let plain = tempDir.appendingPathComponent("not-a-repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: plain, withIntermediateDirectories: true)
+        XCTAssertNil(RepoUsageStore.gitRoot(of: plain.path))
+    }
+
+    func testActivityCooldownCountsRepoOncePerWindow() throws {
+        let repo = try makeRepo("alpha", subpath: "Sources")
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        store.recordActivity(directory: repo.root, now: start)
+        store.recordActivity(directory: repo.inner, now: start.addingTimeInterval(60))
+        XCTAssertEqual(store.usageCount(path: repo.root), 1)
+        store.recordActivity(directory: repo.root, now: start.addingTimeInterval(31 * 60))
+        XCTAssertEqual(store.usageCount(path: repo.root), 2)
+    }
+
+    func testTopReposSortsByCountAndExcludesSaved() throws {
+        let alpha = try makeRepo("alpha").root
+        let beta = try makeRepo("beta").root
+        store.recordOpen(path: beta)
+        store.recordOpen(path: beta)
+        store.recordOpen(path: alpha)
+        XCTAssertEqual(store.topRepos(), [beta, alpha])
+        XCTAssertEqual(store.topRepos(excluding: [beta]), [alpha])
+    }
+
+    func testUsagePersistsAcrossInstances() throws {
+        let alpha = try makeRepo("alpha").root
+        store.recordOpen(path: alpha)
+        store.saveNow()
+        let reloaded = RepoUsageStore(fileURL: tempDir.appendingPathComponent("usage.json"))
+        XCTAssertEqual(reloaded.usageCount(path: alpha), 1)
+    }
+}

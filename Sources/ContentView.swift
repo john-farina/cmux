@@ -2867,29 +2867,25 @@ struct ContentView: View {
             _ = executeConfiguredAction(id: actionId)
         })
 
-        view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: .forkOpenProjectTabRequested)) { notification in
+        view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: .forkOpenProjectRequested)) { notification in
             guard Self.shouldHandleCommandPaletteRequest(
                 observedWindow: observedWindow,
                 requestedWindow: notification.object as? NSWindow,
                 keyWindow: NSApp.keyWindow,
                 mainWindow: NSApp.mainWindow
             ) else { return }
-            guard let path = notification.userInfo?["path"] as? String,
-                  let workspace = tabManager.selectedWorkspace else {
+            guard let path = notification.userInfo?["path"] as? String else {
                 NSSound.beep()
                 return
             }
-            let pane = workspace.focusedPanelId.flatMap { workspace.paneId(forPanelId: $0) }
-                ?? workspace.bonsplitController.allPaneIds.first
-            guard let pane else {
-                NSSound.beep()
-                return
-            }
-            _ = workspace.newTerminalSurface(
-                inPane: pane,
-                focus: true,
-                workingDirectory: path,
-                initialCommand: notification.userInfo?["command"] as? String
+            let placement = (notification.userInfo?["placement"] as? String)
+                .flatMap(ProjectOpenPlacement.init(rawValue:)) ?? .newWorkspace
+            openRepoProject(
+                name: notification.userInfo?["name"] as? String ?? (path as NSString).lastPathComponent,
+                path: path,
+                command: notification.userInfo?["command"] as? String,
+                placement: placement,
+                tabManager: tabManager
             )
         })
 

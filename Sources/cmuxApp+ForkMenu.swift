@@ -1,4 +1,5 @@
 import AppKit
+import Bonsplit
 import CmuxSettings
 import SwiftUI
 
@@ -6,7 +7,112 @@ extension Notification.Name {
     static let forkImportExternalSessionsRequested = Notification.Name("cmux.fork.importExternalSessionsRequested")
     static let forkAutoNameWorkspaceRequested = Notification.Name("cmux.fork.autoNameWorkspaceRequested")
     static let forkRunConfiguredActionRequested = Notification.Name("cmux.fork.runConfiguredActionRequested")
-    static let forkOpenProjectTabRequested = Notification.Name("cmux.fork.openProjectTabRequested")
+    static let forkOpenProjectRequested = Notification.Name("cmux.fork.openProjectRequested")
+}
+
+/// Target/box for NSMenuItems in the tab-bar projects menu. NSMenuItem holds
+/// its target weakly, so the shared singleton keeps actions alive.
+@MainActor
+final class ProjectTabBarMenuHandler: NSObject {
+    static let shared = ProjectTabBarMenuHandler()
+
+    final class Box: NSObject {
+        weak var workspace: Workspace?
+        let pane: PaneID
+        let entry: CmuxProjectMenuEntry
+
+        init(workspace: Workspace, pane: PaneID, entry: CmuxProjectMenuEntry) {
+            self.workspace = workspace
+            self.pane = pane
+            self.entry = entry
+        }
+    }
+
+    @objc func openProject(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? Box,
+              let workspace = box.workspace else {
+            NSSound.beep()
+            return
+        }
+        RepoUsageStore.shared.recordOpen(path: box.entry.path)
+        guard workspace.newTerminalSurface(
+            inPane: box.pane,
+            focus: true,
+            workingDirectory: box.entry.path,
+            initialCommand: box.entry.command
+        ) != nil else {
+            NSSound.beep()
+            return
+        }
+        CmuxLog.agentTemplates.log("project.open placement=tabBar path=\(box.entry.path, privacy: .public)")
+    }
+}
+
+/// Where an opened project lands.
+enum ProjectOpenPlacement: String {
+    case newWorkspace
+    case currentWorkspaceTab
+}
+
+/// One shared open path for every project entrypoint (Toolbelt, tab-bar
+/// button, new-workspace menu, palette-adjacent). Bumps the usage counter.
+@MainActor
+func openRepoProject(
+    name: String,
+    path: String,
+    command: String?,
+    placement: ProjectOpenPlacement,
+    tabManager: TabManager
+) {
+    RepoUsageStore.shared.recordOpen(path: path)
+    switch placement {
+    case .newWorkspace:
+        _ = tabManager.addWorkspace(
+            title: name,
+            workingDirectory: path,
+            initialTerminalCommand: command
+        )
+        CmuxLog.agentTemplates.log("project.open placement=workspace path=\(path, privacy: .public)")
+    case .currentWorkspaceTab:
+        guard let workspace = tabManager.selectedWorkspace,
+              let pane = workspace.focusedPanelId.flatMap({ workspace.paneId(forPanelId: $0) })
+                ?? workspace.bonsplitController.allPaneIds.first else {
+            NSSound.beep()
+            return
+        }
+        _ = workspace.newTerminalSurface(
+            inPane: pane,
+            focus: true,
+            workingDirectory: path,
+            initialCommand: command
+        )
+        CmuxLog.agentTemplates.log("project.open placement=tab path=\(path, privacy: .public)")
+    }
+}
+
+/// Saved projects (usage-sorted, config order breaking ties) followed by
+/// auto-detected repos from RepoUsageStore, for every project menu.
+@MainActor
+func combinedProjectEntries(configStore: CmuxConfigStore?) -> [CmuxProjectMenuEntry] {
+    let saved = configStore?.projectMenuEntries() ?? []
+    let usage = RepoUsageStore.shared
+    let sortedSaved = saved.enumerated()
+        .sorted { lhs, rhs in
+            let lhsCount = usage.usageCount(path: lhs.element.path)
+            let rhsCount = usage.usageCount(path: rhs.element.path)
+            return lhsCount != rhsCount ? lhsCount > rhsCount : lhs.offset < rhs.offset
+        }
+        .map(\.element)
+    let savedPaths = Set(saved.map(\.path))
+    let auto = usage.topRepos(excluding: savedPaths).map { path in
+        CmuxProjectMenuEntry(
+            id: "cmux.fork.autoProject.\(path)",
+            name: (path as NSString).lastPathComponent,
+            path: path,
+            command: nil
+        )
+    }
+    return sortedSaved + auto
 }
 
 /// Fork-added features surfaced as a native menu so they are discoverable
@@ -90,24 +196,38 @@ extension cmuxApp {
                             defaultValue: "Open in New Workspace"
                         )) {
                             postForkMenuAction(
-                                .forkRunConfiguredActionRequested,
-                                userInfo: ["actionId": project.id]
+                                .forkOpenProjectRequested,
+                                userInfo: forkProjectUserInfo(project, placement: .newWorkspace)
                             )
                         }
                         Button(String(
                             localized: "menu.fork.project.openTabHere",
                             defaultValue: "Open Tab in Current Workspace"
                         )) {
-                            var userInfo: [String: Any] = ["path": project.path]
-                            if let command = project.command {
-                                userInfo["command"] = command
-                            }
-                            postForkMenuAction(.forkOpenProjectTabRequested, userInfo: userInfo)
+                            postForkMenuAction(
+                                .forkOpenProjectRequested,
+                                userInfo: forkProjectUserInfo(project, placement: .currentWorkspaceTab)
+                            )
                         }
                     }
                 }
             }
         }
+    }
+
+    private func forkProjectUserInfo(
+        _ project: CmuxProjectMenuEntry,
+        placement: ProjectOpenPlacement
+    ) -> [String: Any] {
+        var userInfo: [String: Any] = [
+            "name": project.name,
+            "path": project.path,
+            "placement": placement.rawValue
+        ]
+        if let command = project.command {
+            userInfo["command"] = command
+        }
+        return userInfo
     }
 
     private func postForkMenuAction(_ name: Notification.Name, userInfo: [String: Any]? = nil) {

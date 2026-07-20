@@ -56,7 +56,7 @@ final class ProjectTabBarMenuHandler: NSObject {
     }
 
     @objc func editProjects(_ sender: NSMenuItem) {
-        NSWorkspace.shared.open(CmuxConfigLocation().userConfigFile)
+        ProjectsManagerWindowController.shared.show()
     }
 
     @objc func openProject(_ sender: NSMenuItem) {
@@ -79,23 +79,35 @@ final class ProjectTabBarMenuHandler: NSObject {
     }
 }
 
+/// Single read-modify-write for the global cmux.json `projects` array.
+/// Awaitable so the manager window can reload after the write lands.
+@MainActor
+func mutateProjects(logKey: String, _ mutate: (inout [CmuxProject]) -> Void) async {
+    let store = JSONConfigStore(fileURL: CmuxConfigLocation().userConfigFile)
+    let key = JSONKey<[CmuxProject]>(id: "projects", defaultValue: [])
+    var projects = await store.value(for: key)
+    mutate(&projects)
+    do {
+        try await store.set(projects, for: key)
+        CmuxLog.agentTemplates.log("project.\(logKey, privacy: .public).ok count=\(projects.count, privacy: .public)")
+    } catch {
+        CmuxLog.agentTemplates.error("project.\(logKey, privacy: .public).failed error=\(String(describing: error), privacy: .public)")
+        NSSound.beep()
+    }
+}
+
 /// Removes the saved project whose expanded path matches, from the global
 /// cmux.json. Auto-detected entries are not stored there and can't be removed.
 @MainActor
 func removeProject(path: String) {
-    Task {
-        let store = JSONConfigStore(fileURL: CmuxConfigLocation().userConfigFile)
-        let key = JSONKey<[CmuxProject]>(id: "projects", defaultValue: [])
-        var projects = await store.value(for: key)
-        let expanded = (path as NSString).expandingTildeInPath
+    Task { await removeProjectNow(path: path) }
+}
+
+@MainActor
+func removeProjectNow(path: String) async {
+    let expanded = (path as NSString).expandingTildeInPath
+    await mutateProjects(logKey: "remove") { projects in
         projects.removeAll { $0.expandedPath == expanded }
-        do {
-            try await store.set(projects, for: key)
-            CmuxLog.agentTemplates.log("project.remove.ok path=\(expanded, privacy: .public) remaining=\(projects.count, privacy: .public)")
-        } catch {
-            CmuxLog.agentTemplates.error("project.remove.failed error=\(String(describing: error), privacy: .public)")
-            NSSound.beep()
-        }
     }
 }
 
@@ -316,7 +328,7 @@ extension cmuxApp {
                     }
                 }
                 Button(String(localized: "menu.projects.edit", defaultValue: "Edit Projects…")) {
-                    NSWorkspace.shared.open(CmuxConfigLocation().userConfigFile)
+                    ProjectsManagerWindowController.shared.show()
                 }
             }
         }
@@ -392,21 +404,16 @@ func saveWorkspaceAsProject(workspace: Workspace) {
 /// "Add to Projects".
 @MainActor
 func saveProject(name: String, path: String) {
-    Task {
-        let store = JSONConfigStore(fileURL: CmuxConfigLocation().userConfigFile)
-        let key = JSONKey<[CmuxProject]>(id: "projects", defaultValue: [])
-        var projects = await store.value(for: key)
+    Task { await saveProjectNow(name: name, path: path) }
+}
+
+@MainActor
+func saveProjectNow(name: String, path: String) async {
+    await mutateProjects(logKey: "save") { projects in
         if let existing = projects.firstIndex(where: { $0.expandedPath == (path as NSString).expandingTildeInPath }) {
             projects[existing].name = name
         } else {
             projects.append(CmuxProject(name: name, path: path))
-        }
-        do {
-            try await store.set(projects, for: key)
-            CmuxLog.agentTemplates.log("project.save.ok name=\(name, privacy: .public) count=\(projects.count, privacy: .public)")
-        } catch {
-            CmuxLog.agentTemplates.error("project.save.failed error=\(String(describing: error), privacy: .public)")
-            NSSound.beep()
         }
     }
 }
@@ -478,5 +485,131 @@ func triggerManualWorkspaceAutoName(workspaceIds: [UUID], tabManager: TabManager
             tabManager.tabs.first(where: { $0.id == workspaceId })?.setAutoNamingFailedStatus()
             NSSound.beep()
         }
+    }
+}
+
+// MARK: - Projects manager window (fork)
+
+/// Floating manager for saved projects and detected repos: rename-free MVP —
+/// delete saved entries, promote detected repos to saved.
+@MainActor
+final class ProjectsManagerWindowController {
+    static let shared = ProjectsManagerWindowController()
+    private var window: NSWindow?
+    private var hosting: NSHostingController<ProjectsManagerView>?
+
+    func show() {
+        if let window, let hosting {
+            // Fresh view state so the list reloads on every open.
+            hosting.rootView = ProjectsManagerView()
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let hosting = NSHostingController(rootView: ProjectsManagerView())
+        let window = NSWindow(contentViewController: hosting)
+        window.title = String(localized: "projectsManager.title", defaultValue: "Projects")
+        window.setContentSize(NSSize(width: 480, height: 380))
+        window.styleMask = [.titled, .closable, .resizable]
+        window.isReleasedWhenClosed = false
+        window.center()
+        self.window = window
+        self.hosting = hosting
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+struct ProjectsManagerView: View {
+    @State private var saved: [CmuxProject] = []
+    @State private var detected: [(path: String, count: Int)] = []
+
+    var body: some View {
+        List {
+            Section(String(localized: "projectsManager.savedSection", defaultValue: "Saved Projects")) {
+                if saved.isEmpty {
+                    Text(String(
+                        localized: "projectsManager.emptySaved",
+                        defaultValue: "No saved projects yet"
+                    ))
+                    .foregroundStyle(.secondary)
+                }
+                ForEach(saved, id: \.path) { project in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(project.name)
+                            Text(project.path)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                        }
+                        Spacer()
+                        Button {
+                            Task {
+                                await removeProjectNow(path: project.path)
+                                await reload()
+                            }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(String(
+                            localized: "menu.fork.project.remove",
+                            defaultValue: "Remove from Projects"
+                        ))
+                    }
+                }
+            }
+            Section(String(localized: "projectsManager.detectedSection", defaultValue: "Detected Repos")) {
+                if detected.isEmpty {
+                    Text(String(
+                        localized: "projectsManager.emptyDetected",
+                        defaultValue: "Repos you work in appear here automatically"
+                    ))
+                    .foregroundStyle(.secondary)
+                }
+                ForEach(detected, id: \.path) { repo in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text((repo.path as NSString).lastPathComponent)
+                            Text(repo.path)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                        }
+                        Spacer()
+                        Button {
+                            Task {
+                                await saveProjectNow(
+                                    name: (repo.path as NSString).lastPathComponent,
+                                    path: repo.path
+                                )
+                                await reload()
+                            }
+                        } label: {
+                            Image(systemName: "plus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(String(
+                            localized: "projectsManager.saveDetected",
+                            defaultValue: "Save as Project"
+                        ))
+                    }
+                }
+            }
+        }
+        .frame(minWidth: 380, minHeight: 260)
+        .task { await reload() }
+    }
+
+    @MainActor
+    private func reload() async {
+        let store = JSONConfigStore(fileURL: CmuxConfigLocation().userConfigFile)
+        saved = await store.value(for: JSONKey<[CmuxProject]>(id: "projects", defaultValue: []))
+        let savedPaths = Set(saved.map(\.expandedPath))
+        detected = RepoUsageStore.shared.topRepos(excluding: savedPaths, limit: 12)
+            .map { ($0, RepoUsageStore.shared.usageCount(path: $0)) }
     }
 }

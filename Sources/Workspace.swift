@@ -13048,45 +13048,62 @@ extension Workspace: BonsplitDelegate {
         let entries = combinedProjectEntries(configStore: configStore)
         let menu = NSMenu()
 
-        // why: live process cwd first — reported directories lag or never
-        // arrive (restored sessions), which left this menu on a stale repo.
-        let paneDirectory = selectedTerminalPanel(inPane: pane).flatMap { terminal -> String? in
-            for candidate in [
-                liveForegroundProcessWorkingDirectory(panelId: terminal.id),
-                panelDirectories[terminal.id],
-                terminal.requestedWorkingDirectory
+        // why: live process cwd from every plausible panel — the pane's
+        // selected tab can be a non-terminal or a dead pty, and reported
+        // directories lag; first live shell wins, focused panel first.
+        var candidatePanels: [UUID] = []
+        if let selected = selectedTerminalPanel(inPane: pane) { candidatePanels.append(selected.id) }
+        if let focused = focusedPanelId, !candidatePanels.contains(focused) { candidatePanels.append(focused) }
+        var paneDirectory: String?
+        var directorySource = "none"
+        for panelId in candidatePanels {
+            for (source, candidate) in [
+                ("live", liveForegroundProcessWorkingDirectory(panelId: panelId)),
+                ("reported", panelDirectories[panelId]),
+                ("requested", terminalPanel(for: panelId)?.requestedWorkingDirectory)
             ] {
                 let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let trimmed, !trimmed.isEmpty { return trimmed }
-            }
-            return nil
-        } ?? (currentDirectory.isEmpty ? nil : currentDirectory)
-        if let paneDirectory,
-           let currentRepo = RepoUsageStore.gitRoot(of: paneDirectory) {
-            let cwd = (paneDirectory as NSString).expandingTildeInPath
-            let savedPaths = configStore?.projectMenuEntries().map(\.path) ?? []
-            // why: saved projects can be subdirs of a repo (triumph-sdk/ios) —
-            // hide the add item whenever the cwd is inside any saved path.
-            let coveredBySaved = savedPaths.contains { cwd == $0 || cwd.hasPrefix($0 + "/") }
-            if !coveredBySaved {
-                let format = String(
-                    localized: "tabBar.projects.addCurrent",
-                    defaultValue: "Add \"%@\" to Projects"
-                )
-                let repoName = (currentRepo as NSString).lastPathComponent
-                let item = NSMenuItem(
-                    title: String(format: format, repoName),
-                    action: #selector(ProjectTabBarMenuHandler.addCurrentRepoToProjects(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = ProjectTabBarMenuHandler.shared
-                item.toolTip = currentRepo
-                item.image = NSImage(systemSymbolName: "plus.circle", accessibilityDescription: nil)
-                item.representedObject = ProjectTabBarMenuHandler.AddBox(name: repoName, path: currentRepo)
-                menu.addItem(item)
-                if !entries.isEmpty {
-                    menu.addItem(.separator())
+                if let trimmed, !trimmed.isEmpty {
+                    paneDirectory = trimmed
+                    directorySource = source
+                    break
                 }
+            }
+            if paneDirectory != nil { break }
+        }
+        if paneDirectory == nil, !currentDirectory.isEmpty {
+            paneDirectory = currentDirectory
+            directorySource = "workspace"
+        }
+        let currentRepo = paneDirectory.flatMap { RepoUsageStore.gitRoot(of: $0) }
+        let savedPaths = configStore?.projectMenuEntries().map(\.path) ?? []
+        let cwd = paneDirectory.map { ($0 as NSString).expandingTildeInPath }
+        // why: saved projects can be subdirs of a repo (triumph-sdk/ios) —
+        // the add item hides whenever the cwd is inside any saved path.
+        let coveredBySaved = cwd.map { cwd in
+            savedPaths.contains { cwd == $0 || cwd.hasPrefix($0 + "/") }
+        } ?? false
+        CmuxLog.agentTemplates.log(
+            "project.menu source=\(directorySource, privacy: .public) cwd=\(paneDirectory ?? "nil", privacy: .public) root=\(currentRepo ?? "nil", privacy: .public) covered=\(coveredBySaved, privacy: .public) saved=\(savedPaths.count, privacy: .public)"
+        )
+        if let currentRepo, !coveredBySaved {
+            let format = String(
+                localized: "tabBar.projects.addCurrent",
+                defaultValue: "Add \"%@\" to Projects"
+            )
+            let repoName = (currentRepo as NSString).lastPathComponent
+            let item = NSMenuItem(
+                title: String(format: format, repoName),
+                action: #selector(ProjectTabBarMenuHandler.addCurrentRepoToProjects(_:)),
+                keyEquivalent: ""
+            )
+            item.target = ProjectTabBarMenuHandler.shared
+            item.toolTip = currentRepo
+            item.image = NSImage(systemSymbolName: "plus.circle", accessibilityDescription: nil)
+            item.representedObject = ProjectTabBarMenuHandler.AddBox(name: repoName, path: currentRepo)
+            menu.addItem(item)
+            if !entries.isEmpty {
+                menu.addItem(.separator())
             }
         }
         if entries.isEmpty, menu.items.isEmpty {

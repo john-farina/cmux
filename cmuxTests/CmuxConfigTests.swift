@@ -2365,3 +2365,52 @@ final class RepoUsageStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.usageCount(path: alpha), 1)
     }
 }
+
+/// fork: launch-env sanitizer — the only thing standing between a bad
+/// launcher env and every terminal in the session dying at once.
+final class LaunchEnvironmentSanitizerTests: XCTestCase {
+    func testStripsLeakedAgentAndPaneVars() {
+        let env = [
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_SESSION_ID": "abc",
+            "ANTHROPIC_MODEL": "opus",
+            "CMUX_SURFACE_ID": "s",
+            "CMUX_SOCKET_PATH": "/tmp/x.sock",
+            "CMUX_CLAUDE_HOOK_STATE_PATH": "/tmp/y",
+            "PATH": "/usr/bin",
+            "SHELL": "/bin/zsh",
+            "CMUX_TAG": "john",
+            "CMUX_PORT": "9200",
+        ]
+        let stripped = Set(LaunchEnvironmentSanitizer.keysToStrip(in: env))
+        XCTAssertEqual(stripped, [
+            "CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "ANTHROPIC_MODEL",
+            "CMUX_SURFACE_ID", "CMUX_SOCKET_PATH", "CMUX_CLAUDE_HOOK_STATE_PATH",
+        ])
+    }
+
+    func testRestoresBasicsDroppedByStrippedLauncher() {
+        let restored = LaunchEnvironmentSanitizer.missingBasics(
+            in: ["PATH": "/usr/bin"],
+            home: "/Users/test",
+            shell: "/bin/zsh",
+            user: "test",
+            temporaryDirectory: "/tmp/t/"
+        )
+        XCTAssertEqual(restored["HOME"], "/Users/test")
+        XCTAssertEqual(restored["SHELL"], "/bin/zsh")
+        XCTAssertEqual(restored["USER"], "test")
+        XCTAssertEqual(restored["LOGNAME"], "test")
+        XCTAssertEqual(restored["TMPDIR"], "/tmp/t/")
+    }
+
+    func testLeavesPresentBasicsAlone() {
+        let env = [
+            "HOME": "/Users/real", "SHELL": "/bin/fish", "USER": "real",
+            "LOGNAME": "real", "TMPDIR": "/tmp/real/",
+        ]
+        XCTAssertTrue(LaunchEnvironmentSanitizer.missingBasics(
+            in: env, home: "/x", shell: "/x", user: "x", temporaryDirectory: "/x"
+        ).isEmpty)
+    }
+}

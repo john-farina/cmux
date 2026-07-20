@@ -153,6 +153,11 @@ struct cmuxApp: App {
             Self.terminateForMissingLaunchTag()
         }
 
+        // fork: strip leaked agent/pane vars + restore SHELL/USER/TMPDIR before
+        // anything snapshots the environment — every spawned shell inherits it.
+        LaunchEnvironmentSanitizer.sanitizeProcessEnvironment()
+        StartupBreadcrumbLog.append("app.init.launchEnvironment.sanitized")
+
         Self.configureGhosttyEnvironment()
         StartupBreadcrumbLog.append("app.init.ghosttyEnvironment.configured")
         _ = KeyboardShortcutSettings.settingsFileStore

@@ -36,12 +36,12 @@ if [[ -d "$INSTALL_PATH" ]]; then
 fi
 
 WAS_RUNNING=0
-if pgrep -qx cmux; then
+if pgrep -qf "/Applications/cmux.app/Contents/MacOS/cmux"; then
   WAS_RUNNING=1
   echo "==> quitting running cmux (graceful; autosave + restore cover the restart)"
   osascript -e 'quit app "cmux"' || true
-  for _ in $(seq 1 40); do pgrep -qx cmux || break; sleep 0.25; done
-  if pgrep -qx cmux; then
+  for _ in $(seq 1 40); do pgrep -qf "/Applications/cmux.app/Contents/MacOS/cmux" || break; sleep 0.25; done
+  if pgrep -qf "/Applications/cmux.app/Contents/MacOS/cmux"; then
     echo "error: cmux did not quit within 10s; NOT force-killing (live sessions). Install aborted." >&2
     exit 1
   fi

@@ -1597,6 +1597,11 @@ struct CmuxProjectMenuEntry: Sendable, Hashable {
     var name: String
     let path: String
     let command: String?
+
+    /// True for usage-detected repos (not stored in cmux.json).
+    var isAutoDetected: Bool {
+        id.hasPrefix("cmux.fork.autoProject.")
+    }
 }
 
 struct CmuxCommandDefinition: Codable, Sendable, Identifiable {

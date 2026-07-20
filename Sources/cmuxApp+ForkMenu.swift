@@ -47,6 +47,18 @@ final class ProjectTabBarMenuHandler: NSObject {
         saveProject(name: box.name, path: box.path)
     }
 
+    @objc func removeSavedProject(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? AddBox else {
+            NSSound.beep()
+            return
+        }
+        removeProject(path: box.path)
+    }
+
+    @objc func editProjects(_ sender: NSMenuItem) {
+        NSWorkspace.shared.open(CmuxConfigLocation().userConfigFile)
+    }
+
     @objc func openProject(_ sender: NSMenuItem) {
         guard let box = sender.representedObject as? Box,
               let workspace = box.workspace else {
@@ -65,6 +77,63 @@ final class ProjectTabBarMenuHandler: NSObject {
         }
         CmuxLog.agentTemplates.log("project.open placement=tabBar path=\(box.entry.path, privacy: .public)")
     }
+}
+
+/// Removes the saved project whose expanded path matches, from the global
+/// cmux.json. Auto-detected entries are not stored there and can't be removed.
+@MainActor
+func removeProject(path: String) {
+    Task {
+        let store = JSONConfigStore(fileURL: CmuxConfigLocation().userConfigFile)
+        let key = JSONKey<[CmuxProject]>(id: "projects", defaultValue: [])
+        var projects = await store.value(for: key)
+        let expanded = (path as NSString).expandingTildeInPath
+        projects.removeAll { $0.expandedPath == expanded }
+        do {
+            try await store.set(projects, for: key)
+            CmuxLog.agentTemplates.log("project.remove.ok path=\(expanded, privacy: .public) remaining=\(projects.count, privacy: .public)")
+        } catch {
+            CmuxLog.agentTemplates.error("project.remove.failed error=\(String(describing: error), privacy: .public)")
+            NSSound.beep()
+        }
+    }
+}
+
+/// Appends the standard tail of every project NSMenu: option-alternates to
+/// remove saved entries are added per-item by callers; this adds the trailing
+/// "Edit Projects…" affordance.
+@MainActor
+func appendEditProjectsMenuItem(to menu: NSMenu) {
+    if !menu.items.isEmpty {
+        menu.addItem(.separator())
+    }
+    let item = NSMenuItem(
+        title: String(localized: "menu.projects.edit", defaultValue: "Edit Projects…"),
+        action: #selector(ProjectTabBarMenuHandler.editProjects(_:)),
+        keyEquivalent: ""
+    )
+    item.target = ProjectTabBarMenuHandler.shared
+    menu.addItem(item)
+}
+
+/// Option-alternate "Remove … from Projects" for a saved entry, native
+/// alternate-item style (hold ⌥ to reveal).
+@MainActor
+func makeRemoveProjectAlternateItem(for entry: CmuxProjectMenuEntry) -> NSMenuItem {
+    let format = String(
+        localized: "menu.projects.removeAlternate",
+        defaultValue: "Remove \"%@\" from Projects"
+    )
+    let item = NSMenuItem(
+        title: String(format: format, entry.name),
+        action: #selector(ProjectTabBarMenuHandler.removeSavedProject(_:)),
+        keyEquivalent: ""
+    )
+    item.target = ProjectTabBarMenuHandler.shared
+    item.isAlternate = true
+    item.keyEquivalentModifierMask = [.option]
+    item.representedObject = ProjectTabBarMenuHandler.AddBox(name: entry.name, path: entry.path)
+    return item
 }
 
 /// Where an opened project lands.
@@ -235,7 +304,19 @@ extension cmuxApp {
                                 userInfo: forkProjectUserInfo(project, placement: .currentWorkspaceTab)
                             )
                         }
+                        if !project.isAutoDetected {
+                            Divider()
+                            Button(String(
+                                localized: "menu.fork.project.remove",
+                                defaultValue: "Remove from Projects"
+                            )) {
+                                removeProject(path: project.path)
+                            }
+                        }
                     }
+                }
+                Button(String(localized: "menu.projects.edit", defaultValue: "Edit Projects…")) {
+                    NSWorkspace.shared.open(CmuxConfigLocation().userConfigFile)
                 }
             }
         }

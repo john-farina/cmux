@@ -205,7 +205,11 @@ extension AppDelegate {
             item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
             item.representedObject = NewWorkspaceProjectMenuBox(windowId: context.windowId, entry: entry)
             submenu.addItem(item)
+            if !entry.isAutoDetected {
+                submenu.addItem(makeRemoveProjectAlternateItem(for: entry))
+            }
         }
+        appendEditProjectsMenuItem(to: submenu)
         let parent = NSMenuItem(
             title: String(
                 localized: "menu.newWorkspace.inProject",
@@ -238,7 +242,11 @@ extension AppDelegate {
             item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
             item.representedObject = NewWorkspaceProjectMenuBox(windowId: context.windowId, entry: entry)
             menu.addItem(item)
+            if !entry.isAutoDetected {
+                menu.addItem(makeRemoveProjectAlternateItem(for: entry))
+            }
         }
+        appendEditProjectsMenuItem(to: menu)
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 

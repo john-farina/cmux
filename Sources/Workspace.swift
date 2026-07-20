@@ -13048,10 +13048,14 @@ extension Workspace: BonsplitDelegate {
         let entries = combinedProjectEntries(configStore: configStore)
         let menu = NSMenu()
 
-        // Active tab of the pane the button lives in, same fallback chain as
-        // executeSurfaceTabBarCommandButton.
+        // why: live process cwd first — reported directories lag or never
+        // arrive (restored sessions), which left this menu on a stale repo.
         let paneDirectory = selectedTerminalPanel(inPane: pane).flatMap { terminal -> String? in
-            for candidate in [panelDirectories[terminal.id], terminal.requestedWorkingDirectory] {
+            for candidate in [
+                liveForegroundProcessWorkingDirectory(panelId: terminal.id),
+                panelDirectories[terminal.id],
+                terminal.requestedWorkingDirectory
+            ] {
                 let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let trimmed, !trimmed.isEmpty { return trimmed }
             }
@@ -13112,7 +13116,11 @@ extension Workspace: BonsplitDelegate {
                 entry: entry
             )
             menu.addItem(item)
+            if !entry.isAutoDetected {
+                menu.addItem(makeRemoveProjectAlternateItem(for: entry))
+            }
         }
+        appendEditProjectsMenuItem(to: menu)
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
